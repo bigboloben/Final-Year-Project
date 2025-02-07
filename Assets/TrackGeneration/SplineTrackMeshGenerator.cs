@@ -432,8 +432,10 @@ namespace Assets.TrackGeneration
             Mesh mesh = new Mesh();
 
             int numPoints = edgePoints.Length;
-            Vector3[] vertices = new Vector3[numPoints * 4];  // 4 vertices per point (front bottom, front top, back bottom, back top)
-            Vector2[] uvs = new Vector2[vertices.Length];
+            // We need 16 vertices per segment (4 vertices per face * 4 faces)
+            List<Vector3> vertices = new List<Vector3>();
+            List<Vector2> uvs = new List<Vector2>();
+            List<Vector3> normals = new List<Vector3>();
 
             if (numPoints >= 16383)
             {
@@ -448,83 +450,58 @@ namespace Assets.TrackGeneration
             }
 
             float currentDistance = 0f;
-
-            for (int i = 0; i < numPoints; i++)
-            {
-                Vector3 right = GetRightDirection(edgePoints, i);
-
-                // Vertex positions
-                vertices[i * 4] = edgePoints[i] + right * wallDepth;   // right bottom
-                vertices[i * 4 + 1] = edgePoints[i] + right * wallDepth + Vector3.up * wallHeight;  // right top
-                vertices[i * 4 + 2] = edgePoints[i] + right * -wallDepth + Vector3.up * wallHeight;  // left top
-                vertices[i * 4 + 3] = edgePoints[i] + right * -wallDepth; // left bottom
-
-
-                if (i > 0)
-                {
-                    currentDistance += Vector3.Distance(edgePoints[i], edgePoints[i - 1]);
-                }
-
-                float u = currentDistance / totalLength; // Added tiling scale
-                float v = 0f;  // Bottom of wall
-                float v2 = wallHeight;  // Top of wall
-
-                uvs[i * 4] = new Vector2(u, v);      // Right bottom
-                uvs[i * 4 + 1] = new Vector2(u, v2); // Right top
-                uvs[i * 4 + 2] = new Vector2(u, v2); // Left top
-                uvs[i * 4 + 3] = new Vector2(u, v);  // Left bottom
-            }
-
-
             List<int> triangles = new List<int>();
 
-            // Generate triangles for the front and back faces based on the connection pattern
             for (int i = 0; i < numPoints - 1; i++)
             {
-                int thisIndex = (i * 4);
-                int nextIndex = (i + 1) * 4;
-                // clockwise ordering right face
-                triangles.Add(thisIndex);       // this bottom right
-                triangles.Add(thisIndex + 1);   // this top right
-                triangles.Add(nextIndex);       // next bottom right
+                Vector3 right = GetRightDirection(edgePoints, i);
+                Vector3 nextRight = GetRightDirection(edgePoints, i + 1);
 
-                triangles.Add(thisIndex + 1);   // this top right
-                triangles.Add(nextIndex + 1);   // next top right
-                triangles.Add(nextIndex);       // next bottom right
+                // Current segment vertices
+                Vector3 bottomRightCurrent = edgePoints[i] + right * wallDepth;
+                Vector3 topRightCurrent = edgePoints[i] + right * wallDepth + Vector3.up * wallHeight;
+                Vector3 topLeftCurrent = edgePoints[i] + right * -wallDepth + Vector3.up * wallHeight;
+                Vector3 bottomLeftCurrent = edgePoints[i] + right * -wallDepth;
 
-                // clockwise ordering top face
-                triangles.Add(thisIndex + 1);   // this top right
-                triangles.Add(thisIndex + 2);   // this top left
-                triangles.Add(nextIndex + 1);   // next top right
+                // Next segment vertices
+                Vector3 bottomRightNext = edgePoints[i + 1] + nextRight * wallDepth;
+                Vector3 topRightNext = edgePoints[i + 1] + nextRight * wallDepth + Vector3.up * wallHeight;
+                Vector3 topLeftNext = edgePoints[i + 1] + nextRight * -wallDepth + Vector3.up * wallHeight;
+                Vector3 bottomLeftNext = edgePoints[i + 1] + nextRight * -wallDepth;
 
-                triangles.Add(thisIndex + 2);   // this top left
-                triangles.Add(nextIndex + 2);   // next top left
-                triangles.Add(nextIndex + 1);   // next top right
+                currentDistance += Vector3.Distance(edgePoints[i], edgePoints[i + 1]);
+                float uCurrent = currentDistance / totalLength;
+                float uPrev = (i > 0) ? (currentDistance - Vector3.Distance(edgePoints[i], edgePoints[i + 1])) / totalLength : 0f;
 
-                // clockwise ordering left face
-                triangles.Add(thisIndex + 3);   // this bottom left
-                triangles.Add(nextIndex + 3);   // next bottom left
-                triangles.Add(thisIndex + 2);   // this top left
+                int baseIndex = vertices.Count;
 
-                triangles.Add(thisIndex + 2);   // this top left
-                triangles.Add(nextIndex + 3);   // next bottom left
-                triangles.Add(nextIndex + 2);   // next top left
+                // Right face
+                AddQuad(vertices, uvs, normals, triangles, baseIndex,
+                    bottomRightCurrent, topRightCurrent, bottomRightNext, topRightNext,
+                    uPrev, uCurrent, right);
 
-                // clockwise ordering bottom face
-                triangles.Add(thisIndex);       // this bottom right
-                triangles.Add(nextIndex);       // next bottom right
-                triangles.Add(thisIndex + 3);   // this bottom left
+                // Top face
+                AddQuad(vertices, uvs, normals, triangles, baseIndex + 4,
+                    topRightCurrent, topLeftCurrent, topRightNext, topLeftNext,
+                    uPrev, uCurrent, Vector3.up);
 
-                triangles.Add(thisIndex + 3);   // this bottom left
-                triangles.Add(nextIndex);       // next bottom right
-                triangles.Add(nextIndex + 3);   // next bottom left
+                // Left face
+                AddQuad(vertices, uvs, normals, triangles, baseIndex + 8,
+                    bottomLeftNext, topLeftNext, bottomLeftCurrent, topLeftCurrent,
+                    uPrev, uCurrent, -right);
+
+                // Bottom face
+                AddQuad(vertices, uvs, normals, triangles, baseIndex + 12,
+                    bottomRightCurrent, bottomLeftCurrent, bottomRightNext, bottomLeftNext,
+                    uPrev, uCurrent, -Vector3.up);
             }
 
-            mesh.vertices = vertices;
-            mesh.triangles = triangles.ToArray();
-            mesh.uv = uvs;
-            mesh.RecalculateNormals();
+            mesh.SetVertices(vertices);
+            mesh.SetUVs(0, uvs);
+            mesh.SetNormals(normals);
+            mesh.SetTriangles(triangles.ToArray(), 0);
             mesh.RecalculateBounds();
+
             meshFilter.mesh = mesh;
 
             MeshCollider collider = wallObject.AddComponent<MeshCollider>();
@@ -532,6 +509,47 @@ namespace Assets.TrackGeneration
             collider.material = physics;
 
             return wallObject;
+        }
+
+        private void AddQuad(
+            List<Vector3> vertices,
+            List<Vector2> uvs,
+            List<Vector3> normals,
+            List<int> triangles,
+            int baseIndex,
+            Vector3 bottomLeft,
+            Vector3 topLeft,
+            Vector3 bottomRight,
+            Vector3 topRight,
+            float uMin,
+            float uMax,
+            Vector3 normal)
+        {
+            // Add vertices
+            vertices.Add(bottomLeft);
+            vertices.Add(topLeft);
+            vertices.Add(bottomRight);
+            vertices.Add(topRight);
+
+            // Add UVs
+            uvs.Add(new Vector2(uMin, 0));
+            uvs.Add(new Vector2(uMin, 1));
+            uvs.Add(new Vector2(uMax, 0));
+            uvs.Add(new Vector2(uMax, 1));
+
+            // Add normals
+            for (int i = 0; i < 4; i++)
+            {
+                normals.Add(normal);
+            }
+
+            // Add triangles
+            triangles.Add(baseIndex);
+            triangles.Add(baseIndex + 1);
+            triangles.Add(baseIndex + 2);
+            triangles.Add(baseIndex + 1);
+            triangles.Add(baseIndex + 3);
+            triangles.Add(baseIndex + 2);
         }
     }
 }
