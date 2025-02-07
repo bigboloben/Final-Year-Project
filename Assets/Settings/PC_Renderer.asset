@@ -67,13 +67,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_Active: 1
   shaderSettings:
-    outlineScale: 1
+    outlineScale: 1.2
     robertsCrossMultiplier: 8
     depthThreshold: 8
     outlineColor: {r: 0, g: 0, b: 0, a: 1}
-    normalThreshold: 20
+    normalThreshold: 12
     steepAngleThreshold: 5
-    steepAngleMultiplier: 0.5
+    steepAngleMultiplier: 2
   injectionPoint: 350
   layerMask:
     serializedVersion: 2

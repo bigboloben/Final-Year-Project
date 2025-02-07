@@ -744,8 +744,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   carPrefab: {fileID: 6674457689556500837, guid: bf147508e2d30744d9cf29320ae8c4b1, type: 3}
   trackGenerator: {fileID: 1170417230}
-  cameraOffset: {x: 0, y: 3, z: -15}
-  rearCameraOffset: {x: 0, y: 3, z: 15}
+  cameraOffset: {x: 0, y: 3, z: -10}
+  rearCameraOffset: {x: 0, y: 3, z: 10}
   cameraFollowSpeed: 5
   cameraRotationSpeed: 5
   cameraLookSensitivity: 300

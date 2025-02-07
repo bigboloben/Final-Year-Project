@@ -21,15 +21,14 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: TrackMaterial
-  m_Shader: {fileID: -6465566751694194690, guid: dbb868fd8aa49f542b132d281cc01e13, type: 3}
+  m_Shader: {fileID: -6465566751694194690, guid: 4254b4defe1e6d24caeebeae6a3787ec, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
-  - LIGHTMODE_TOONSHADER
+  - MAIN_LIGHT_CALCULATE_SHADOWS
   - _MAIN_LIGHT_SHADOWS_CASCADE
   - _SHADOWS_SOFT
-  m_InvalidKeywords:
-  - MAIN_LIGHT_CALCULATE_SHADOWS
+  m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
@@ -128,10 +127,13 @@ Material:
     - _Glossiness: 0
     - _GlossyReflections: 0
     - _MAIN_LIGHT_SHADOWS_CASCADE: 1
+    - _Max: 1
     - _Max_Brightness: 1
     - _Metallic: 0
+    - _Min: 0.271
     - _Min_Brightness: 0.3
     - _Mode: 0
+    - _NumberOfColors: 4
     - _Number_Of_Dots: 10
     - _OcclusionStrength: 1
     - _Outline_Thickness: 0
@@ -143,7 +145,7 @@ Material:
     - _SHADOWS_SOFT: 1
     - _Shade_Size: 0.25
     - _Shadow_Threshold: 0.5
-    - _Smoothness: 0.109
+    - _Smoothness: 2
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SrcBlend: 1

@@ -142,10 +142,10 @@ Material:
     - _Max: 1
     - _Max_Brightness: 1
     - _Metallic: 0
-    - _Min: 0.139
+    - _Min: 0.107
     - _Min_Brightness: 0.3
     - _NormalMapKwToggle: 0
-    - _NumberOfColors: 4
+    - _NumberOfColors: 9
     - _Number_Of_Dots: 10
     - _OcclusionStrength: 1
     - _Outline_Thickness: 0
@@ -158,7 +158,7 @@ Material:
     - _Shade_Size: 0.25
     - _Shadow_Threshold: 0.5
     - _Shininess: 0
-    - _Smoothness: 0.276
+    - _Smoothness: 0.38
     - _SmoothnessSource: 0
     - _SmoothnessTextureChannel: 0
     - _SpecSource: 0
@@ -190,7 +190,7 @@ Material:
     - _Shadow_Texture_Tiling: {r: 0, g: 0, b: 0, a: 0}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _SubsurfaceColor: {r: 1, g: 1, b: 1, a: 1}
-    - _Tiling: {r: 20, g: 1, b: 0, a: 0}
+    - _Tiling: {r: 50, g: 1, b: 0, a: 0}
     - _UvOffset: {r: 0, g: 0, b: 0, a: 0}
     - _UvTiling: {r: 1, g: 1, b: 0, a: 0}
     - _outline_color: {r: 0, g: 0, b: 0, a: 0}

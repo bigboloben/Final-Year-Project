@@ -488,7 +488,7 @@ namespace Assets.TrackGeneration
                 // Left face
                 AddQuad(vertices, uvs, normals, triangles, baseIndex + 8,
                     bottomLeftNext, topLeftNext, bottomLeftCurrent, topLeftCurrent,
-                    uPrev, uCurrent, -right);
+                    uCurrent, uPrev, -right);
 
                 // Bottom face
                 AddQuad(vertices, uvs, normals, triangles, baseIndex + 12,
