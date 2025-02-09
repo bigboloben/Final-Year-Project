@@ -61,7 +61,7 @@ public class FollowCameraScript : MonoBehaviour
         float horizontalRotation = horizontalRotationInput * lookSensitivity * Time.deltaTime;
 
         // Debugging line to check input values
-        Debug.Log($"Horizontal Rotation Input: {horizontalRotationInput}");
+        //Debug.Log($"Horizontal Rotation Input: {horizontalRotationInput}");
 
         // Rotate the camera around the car's position
         // Get the direction from the car to the camera
