@@ -9,9 +9,9 @@ public class CarSpawner : MonoBehaviour
 
     [Header("Camera Setup")]
     //public CameraControlScript cameraControlScript;
-    public Vector3 cameraOffset = new Vector3(0, 3, -10);
-    public Vector3 rearCameraOffset = new Vector3(0, 3, 10);
-    public float cameraFollowSpeed = 5f;
+    public Vector3 cameraOffset = new Vector3(0, 3, -8);
+    public Vector3 rearCameraOffset = new Vector3(0, 3, 8);
+    public float cameraFollowSpeed = 6f;
     public float cameraRotationSpeed = 5f;
     public float cameraLookSensitivity = 100f;
 
@@ -81,12 +81,14 @@ public class CarSpawner : MonoBehaviour
             if (i == 0)
             {
                 followScript.offset = cameraOffset;
+                followScript.followSpeed = cameraFollowSpeed;
             }
             else 
             {
                 followScript.offset = rearCameraOffset;
                 cam.enabled = false;
-                followScript.front = true;
+                followScript.followSpeed = 10f;
+                //followScript.front = true;
             
             }
             followScript.followSpeed = cameraFollowSpeed;

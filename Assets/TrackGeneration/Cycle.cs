@@ -137,19 +137,19 @@ namespace Assets.TrackGeneration
                 List<Vector2> controlPoints = new List<Vector2>();
                 int h = (int) Mathf.Repeat(i - 1, Points.Count);
                 int j = (int) Mathf.Repeat(i + 1, Points.Count);
-                Debug.Log($"h{h}, i{i}, j{j}");
+                //Debug.Log($"h{h}, i{i}, j{j}");
                 Vector2 v0 = Points[h];
                 Vector2 v1 = Points[i];
                 Vector2 v2 = Points[j];
 
                 controlPoints = GetControlPoints(v0, v1, v2);
-                Debug.Log($"v0{v0.ToString()}, v1{v1.ToString()}, v2{v2.ToString()}");
+                //Debug.Log($"v0{v0.ToString()}, v1{v1.ToString()}, v2{v2.ToString()}");
                 curvePoints.AddRange(GetBezierCurve(controlPoints[0], controlPoints[1], controlPoints[2], controlPoints[3], numberOfPoints));
 
             }
-            Debug.Log($"Points: {string.Join(", ", Points.Select(p => $"({p.x}, {p.y})"))}");
+            //Debug.Log($"Points: {string.Join(", ", Points.Select(p => $"({p.x}, {p.y})"))}");
             Points = curvePoints;
-            Debug.Log($"Points: {string.Join(", ", Points.Select(p => $"({p.x}, {p.y})"))}");
+            //Debug.Log($"Points: {string.Join(", ", Points.Select(p => $"({p.x}, {p.y})"))}");
             return curvePoints;
         }
 
@@ -175,7 +175,7 @@ namespace Assets.TrackGeneration
         {
             List<Vector2> curvePoints = new List<Vector2>();
             float step = (1 / (float)numberOfPoints);
-            Debug.Log(step);
+            //Debug.Log(step);
             for (float t = 0; t <= 1; t += step)
             {
                 Vector2 A = Vector2.Lerp(p0, p1, t);
@@ -216,7 +216,7 @@ namespace Assets.TrackGeneration
                 List<Vector2> controlPoints = new List<Vector2>();
                 int h = (int)Mathf.Repeat(i - 1, Points.Count);
                 int j = (int)Mathf.Repeat(i + 1, Points.Count);
-                Debug.Log($"h{h}, i{i}, j{j}");
+                //Debug.Log($"h{h}, i{i}, j{j}");
 
                 Vector2 v0 = Points[h];
                 Vector2 v1 = Points[i];

@@ -508,6 +508,8 @@ namespace Assets.TrackGeneration
             collider.sharedMesh = mesh;
             collider.material = physics;
 
+            wallObject.layer = LayerMask.NameToLayer("Outlines");
+
             return wallObject;
         }
 

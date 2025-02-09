@@ -4,11 +4,11 @@ using UnityEngine.InputSystem;
 public class FollowCameraScript : MonoBehaviour
 {
     public Transform carTransform; // Reference to the car's transform
-    public Vector3 offset = new Vector3(0, 5, -5); // Position offset from the car
+    public Vector3 offset; // Position offset from the car
     public float followSpeed = 5f; // Smooth speed for following the car
     public float rotationSpeed = 5f; // Smooth speed for rotating the camera
     public float lookSensitivity = 300f; // Sensitivity of the right stick rotation
-    public bool front = false;
+    //public bool front = false;
 
     private CarControls controls;
     private float horizontalRotationInput = 0f; // Input for horizontal rotation
@@ -48,11 +48,9 @@ public class FollowCameraScript : MonoBehaviour
         Vector3 targetPosition = carTransform.position + carTransform.TransformVector(offset);
 
         // Smoothly move the camera to the target position
-        if (front) { transform.position = targetPosition; }
-        else 
-        { 
-            transform.position = Vector3.Lerp(transform.position, targetPosition, followSpeed * Time.deltaTime);
-        }
+        
+        transform.position = Vector3.Lerp(transform.position, targetPosition, followSpeed * Time.deltaTime);
+        
         // Rotate the camera based on right/left input
         RotateCamera();
     }

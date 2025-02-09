@@ -190,7 +190,7 @@ Material:
     - _Shadow_Texture_Tiling: {r: 0, g: 0, b: 0, a: 0}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _SubsurfaceColor: {r: 1, g: 1, b: 1, a: 1}
-    - _Tiling: {r: 50, g: 1, b: 0, a: 0}
+    - _Tiling: {r: 25, g: 1, b: 0, a: 0}
     - _UvOffset: {r: 0, g: 0, b: 0, a: 0}
     - _UvTiling: {r: 1, g: 1, b: 0, a: 0}
     - _outline_color: {r: 0, g: 0, b: 0, a: 0}
