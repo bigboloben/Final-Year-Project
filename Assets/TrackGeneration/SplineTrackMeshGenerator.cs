@@ -1,6 +1,8 @@
 using UnityEngine;
 using UnityEngine.Splines;
 using System.Collections.Generic;
+using Unity.Mathematics;
+
 
 namespace Assets.TrackGeneration
 {
@@ -35,7 +37,7 @@ namespace Assets.TrackGeneration
             
 
             GameObject trackObject = new GameObject("Track");
-            List<Vector3[]> splinePoints = GenerateOffsetSplines(spline);
+            List<Vector3[]> splinePoints = GenerateOffsetSplinesFromSplines(spline);
             GameObject trackSurface = GenerateTrackSurface(splinePoints, trackMaterial);
             StartLineInfo startLineInfo = CreateStartFinishLine(splinePoints[1], startLineMaterial);
             GameObject leftWall = GenerateWall(splinePoints[0], wallMaterial, wallPhysicsMaterial);
@@ -168,6 +170,92 @@ namespace Assets.TrackGeneration
             return texture;
         }
 
+        private List<Vector3[]> GenerateOffsetSplinesFromSplines(SplineContainer centerSplineContainer)
+        {
+            Spline centerSpline = centerSplineContainer.Spline;
+
+            //GameObject leftSplineObject = new GameObject("LeftSpline");
+            //GameObject rightSplineObject = new GameObject("RightSpline");
+            //SplineContainer leftSplineContainer = leftSplineObject.AddComponent<SplineContainer>();
+            //SplineContainer rightSplineContainer = rightSplineObject.AddComponent<SplineContainer>();
+
+            // Get references to the new splines
+            //Spline leftSpline = leftSplineContainer.Spline;
+            //Spline rightSpline = rightSplineContainer.Spline;
+
+            Spline leftSpline = new Spline();
+            Spline rightSpline = new Spline();
+
+            // Clear any default knots
+            leftSpline.Clear();
+            rightSpline.Clear();
+
+            for (int i = 0; i < centerSpline.Count; i++)
+            {
+                // Create knots for both sides
+                BezierKnot leftKnot = centerSpline[i];
+                BezierKnot rightKnot = centerSpline[i];
+
+                // Calculate offset directions
+                Vector3 tangent = ((Vector3)leftKnot.TangentOut).normalized;
+                Vector3 up = Vector3.up;
+                float3 rightVector = Vector3.Cross(up, tangent).normalized;
+
+                // Apply offsets
+                leftKnot.Position -= rightVector * trackWidth / 2;
+                rightKnot.Position += rightVector * trackWidth / 2;
+
+                float innerScale = (centerSpline.Count - trackWidth / 2) / centerSpline.Count;
+                float outerScale = (centerSpline.Count + trackWidth / 2) / centerSpline.Count;
+
+                leftKnot.TangentIn *= innerScale;
+                leftKnot.TangentOut *= innerScale;
+
+                rightKnot.TangentIn *= outerScale;
+                rightKnot.TangentOut *= outerScale;
+
+
+                // Add knots to the new splines
+                leftSpline.Add(leftKnot);
+                rightSpline.Add(rightKnot);
+
+            }
+            leftSpline.Closed = true;
+            rightSpline.Closed = true;
+            centerSpline.Closed = true;
+
+            List<Vector3[]> splinePoints = new List<Vector3[]>();
+
+            int numberOfPoints = Mathf.Max(32, (int)(centerSpline.GetLength() * segmentsPerUnit));
+            Vector3[] leftPoints = new Vector3[numberOfPoints];
+            Vector3[] centerPoints = new Vector3[numberOfPoints];
+            Vector3[] rightPoints = new Vector3[numberOfPoints];
+
+            Vector3 heightOffset = -Vector3.down * TRACK_HEIGHT_OFFSET;
+            for (int i = 0; i < numberOfPoints; i++)
+            {
+                float t = i / (float)(numberOfPoints - 1);  // This gives us values from 0 to 1
+                Vector3 leftPosition = leftSpline.EvaluatePosition(t);
+                leftPosition += heightOffset;
+                leftPoints[i] = leftPosition;
+
+                Vector3 centerPosition = centerSpline.EvaluatePosition(t);
+                centerPosition += heightOffset;
+                centerPoints[i] = centerPosition;
+
+                Vector3 rightPosition = rightSpline.EvaluatePosition(t);
+                rightPosition += heightOffset;
+                rightPoints[i] = rightPosition;
+            }
+
+            splinePoints.Add(leftPoints);
+            splinePoints.Add(centerPoints);
+            splinePoints.Add(rightPoints);
+
+
+            return splinePoints;
+        }
+
 
         private List<Vector3[]> GenerateOffsetSplines(SplineContainer centerSpline)
         {
@@ -178,8 +266,14 @@ namespace Assets.TrackGeneration
             Vector3[] centerPoints = new Vector3[pointCount];
             Vector3[] rightPoints = new Vector3[pointCount];
 
+
             // Get initial spline information
             float baseHeight = centerSpline.EvaluatePosition(0).y;
+
+            float leftWidth = trackWidth;
+            float rightWidth = trackWidth;
+
+
 
             for (int i = 0; i < pointCount; i++)
             {
@@ -189,23 +283,43 @@ namespace Assets.TrackGeneration
                 Vector3 up = Vector3.up;
                 Vector3 right = Vector3.Cross(tangent, up).normalized;
 
-                // Calculate curvature (you'll need to implement this)
+                
                 float curvature = CalculateCurvature(centerSpline, t);
+                //// Apply banking rotation based on curvature
+                //float bankAngle = curvature * bankingAngle;
+                //Quaternion bankRotation = Quaternion.AngleAxis(bankAngle, tangent);
 
-                // Apply banking rotation based on curvature
-                float bankAngle = curvature * bankingAngle;
-                Quaternion bankRotation = Quaternion.AngleAxis(bankAngle, tangent);
+                //// Rotate the right and up vectors
+                //right = bankRotation * right;
+                //up = bankRotation * up;
 
-                // Rotate the right and up vectors
-                right = bankRotation * right;
-                up = bankRotation * up;
+
+
+
+                //if (curvature < 0)
+                //{
+                //    leftWidth = trackWidth + (Mathf.Abs(curvature) * 0.5f);
+                //    rightWidth = trackWidth;
+                //}
+                //else if (curvature > 0)
+                //{
+                //    rightWidth = trackWidth + (Mathf.Abs(curvature) * 0.5f);
+                //    leftWidth = trackWidth;
+                //}
+                //else
+                //{
+                //    rightWidth = trackWidth;
+                //    leftWidth = trackWidth;
+                //}
+
+
 
                 // Apply the consistent height offset and banking
                 Vector3 heightOffset = up * TRACK_HEIGHT_OFFSET;
 
                 centerPoints[i] = position + heightOffset;
-                leftPoints[i] = position - right * (trackWidth / 2) + heightOffset;
-                rightPoints[i] = position + right * (trackWidth / 2) + heightOffset;
+                leftPoints[i] = position - right * (leftWidth / 2) + heightOffset;
+                rightPoints[i] = position + right * (rightWidth / 2) + heightOffset;
             }
 
             splinePoints.Add(leftPoints);
@@ -214,23 +328,84 @@ namespace Assets.TrackGeneration
 
             return splinePoints;
         }
+        //private float CalculateCurvature(SplineContainer spline, float t)
+        //{
+        //    // Use three points to calculate curvature
+        //    float delta = 0.01f;  // Larger delta for better stability
+
+        //    // Get three points along the curve
+        //    Vector3 p0 = spline.EvaluatePosition(Mathf.Max(0, t - delta));
+        //    Vector3 p1 = spline.EvaluatePosition(t);
+        //    Vector3 p2 = spline.EvaluatePosition(Mathf.Min(1, t + delta));
+
+        //    // Calculate vectors between points
+        //    Vector3 v1 = p1 - p0;
+        //    Vector3 v2 = p2 - p1;
+
+        //    // Calculate the change in direction
+        //    float angle = Vector3.SignedAngle(v1, v2, Vector3.up);
+
+        //    // Convert angle to curvature (sign indicates left/right turn)
+        //    float curvature = angle / (delta * spline.Spline.GetLength());
+
+        //    return curvature; // Convert to radians
+        //}
 
         private float CalculateCurvature(SplineContainer spline, float t)
         {
-            // Get position and derivatives
-            Vector3 p1 = spline.EvaluatePosition(t);
-            Vector3 v1 = spline.EvaluateTangent(t);
+            // Calculate the first derivative (tangent)
+            Vector3 firstDerivative = ((Vector3)spline.EvaluateTangent(t)).normalized;
 
-            // Use a small delta to approximate second derivative
-            float delta = 0.001f;
-            Vector3 v2 = spline.EvaluateTangent(t + delta);
+            // Calculate a small step for numerical differentiation
+            float deltaT = 0.01f;
 
-            // Calculate curvature 
-            Vector3 acceleration = (v2 - v1) / delta;
-            float curvature = Vector3.Cross(v1, acceleration).magnitude / Mathf.Pow(v1.magnitude, 3);
+            // Calculate the second derivative
+            Vector3 tangentBefore = ((Vector3)spline.EvaluateTangent(t - deltaT)).normalized;
+            Vector3 tangentAfter = ((Vector3)spline.EvaluateTangent(t + deltaT)).normalized;
+            Vector3 secondDerivative = (tangentAfter - tangentBefore) / (2 * deltaT);
+
+           
+            float curvature = secondDerivative.magnitude / Mathf.Pow(firstDerivative.magnitude, 3);
 
             return curvature;
         }
+        private float[] SmoothCurvatureValues(float[] curvatures, int smoothingRadius = 2)
+        {
+            float[] smoothedCurvatures = new float[curvatures.Length];
+            for (int i = 0; i < curvatures.Length; i++)
+            {
+                float sum = 0f;
+                int count = 0;
+                for (int j = -smoothingRadius; j <= smoothingRadius; j++)
+                {
+                    int index = i + j;
+                    if (index >= 0 && index < curvatures.Length)
+                    {
+                        sum += curvatures[index];
+                        count++;
+                    }
+                }
+                smoothedCurvatures[i] = sum / count;
+            }
+            return smoothedCurvatures;
+        }
+       
+        //private float CalculateCurvature(SplineContainer spline, float t)
+        //{
+        //    // Get position and derivatives
+        //    Vector3 p1 = spline.EvaluatePosition(t);
+        //    Vector3 v1 = spline.EvaluateTangent(t);
+
+        //    // Use a small delta to approximate second derivative
+        //    float delta = 0.001f;
+        //    Vector3 v2 = spline.EvaluateTangent(t + delta);
+
+        //    // Calculate curvature 
+        //    Vector3 acceleration = (v2 - v1) / delta;
+        //    float curvature = Vector3.Cross(v1, acceleration).magnitude / Mathf.Pow(v1.magnitude, 3);
+
+        //    return curvature;
+        //}
 
 
         private StartLineInfo CreateStartFinishLine(Vector3[] centerPoints, Material material)
