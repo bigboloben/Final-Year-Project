@@ -5,7 +5,7 @@ public class CarSpawner : MonoBehaviour
 {
     [Header("Car Setup")]
     public GameObject carPrefab;
-    public Track3DVisualizer trackGenerator;
+    public TrackHandler trackHandler;
 
     [Header("Camera Setup")]
     //public CameraControlScript cameraControlScript;
@@ -26,7 +26,7 @@ public class CarSpawner : MonoBehaviour
 
     public void SpawnPlayerCar()
     {
-        if (carPrefab == null || trackGenerator == null)
+        if (carPrefab == null || trackHandler == null)
         {
             Debug.LogError("Car prefab or track generator not assigned!");
             return;
@@ -34,15 +34,15 @@ public class CarSpawner : MonoBehaviour
 
         ClearExisting();
 
-        var (startPos, _, startRot) = trackGenerator.GetTrackStartTransform();
+        var (startPos, _, startRot) = trackHandler.GetTrackStartTransform();
 
         // Spawn the car
         playerCar = Instantiate(carPrefab, startPos, startRot);
-
+        playerCar.tag = "Player";
         CarControlScript carControl = playerCar.GetComponent<CarControlScript>();
         if (carControl != null)
         {
-            carControl.trackGenerator = trackGenerator;
+            carControl.trackHandler = trackHandler;
         }
         else
         {
@@ -88,6 +88,7 @@ public class CarSpawner : MonoBehaviour
                 followScript.offset = rearCameraOffset;
                 cam.enabled = false;
                 followScript.followSpeed = 10f;
+                cameraObj.GetComponent<AudioListener>().enabled = false;
                 //followScript.front = true;
             
             }

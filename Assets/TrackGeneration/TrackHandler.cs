@@ -3,12 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine.Splines;
 using UnityEngine.InputSystem;
-using UnityEditor.ShaderGraph;
-using Unity.VisualScripting;
+
 
 namespace Assets.TrackGeneration
 {
-    public class Track3DVisualizer : MonoBehaviour
+    public class TrackHandler : MonoBehaviour
     {
         private CarControls controls;
 
@@ -27,7 +26,11 @@ namespace Assets.TrackGeneration
         private Cycle cycle;
         private VoronoiDiagram voronoi;
         private SplineContainer trackSpline;
+        private SplineContainer rightSpline;
+        private SplineContainer leftSpline;
         private GameObject splineObject;
+        private GameObject rightSplineObject;
+        private GameObject leftSplineObject;
 
         [Header("Track Settings")]
         public float trackWidth = 100f;
@@ -35,13 +38,20 @@ namespace Assets.TrackGeneration
         private float wallHeight = 0.5f;
         private float wallWidth = 0.25f;
         private int segments = 2;
-        private float banking = 0f;
+        private float banking = 15f;
         public Material trackMaterial;
         public Material wallMaterial;
         public PhysicsMaterial wallPhysicsMaterial;
         public Material startLineMaterial;
         public Material gridMarkerMaterial ;
         public bool showDebugLines = false;
+
+        [Header("Checkpoint Settings")]
+        public float checkpointSpacing = 20f;
+        public float checkpointWidth = 20f;
+        public float checkpointHeight = 5f;
+        //private CheckpointManager checkpointManager;
+        private List<Checkpoint> checkpoints = new List<Checkpoint>();  
 
         public Camera trackCamera;  // Reference to the camera
         public float cameraHeight = 800f;  // Height of the camera above the track
@@ -52,6 +62,10 @@ namespace Assets.TrackGeneration
 
         private GameObject trackMesh;
         private List<LineRenderer> debugLineRenderers = new List<LineRenderer>();
+        private TrackMesh trackMeshGenerator;
+        private TrackParameters trackParameters;
+
+
 
         void Awake()
         {
@@ -117,7 +131,31 @@ namespace Assets.TrackGeneration
                 Destroy(splineObject);
                 splineObject = null;
                 trackSpline = null;
+                Destroy(rightSplineObject);
+                rightSplineObject = null;
+                rightSpline = null;
+                Destroy(leftSplineObject);
+                leftSplineObject = null;
+                leftSpline = null;
             }
+
+            if (checkpoints == null)
+            {
+                checkpoints = new List<Checkpoint>();
+            }
+            else
+            {
+                foreach (var checkpoint in checkpoints)
+                {
+                    if (checkpoint != null && checkpoint.gameObject != null)
+                    {
+                        Destroy(checkpoint.gameObject);
+                    }
+                }
+                checkpoints.Clear();
+            }
+
+
 
             points = new List<Vector2>();
             graph = new Graph();
@@ -131,14 +169,27 @@ namespace Assets.TrackGeneration
 
             voronoi = new VoronoiDiagram(delaunayTriangulation, delaunayTriangulation.GetTriangles());
             cycle = voronoi.SortCycles(cycles);
+            cycle.FindLongestSegmentAndSetStart();
 
             splineObject = new GameObject($"Track Spline");
+            rightSplineObject = new GameObject($"Right Spline");
+            leftSplineObject = new GameObject($"Left Spline");
             splineObject.transform.parent = transform;
+            rightSplineObject.transform.parent = transform;
+            leftSplineObject.transform.parent = transform;
+
             splineObject.SetActive(false);
+            rightSplineObject.SetActive(false);
+            leftSplineObject.SetActive(false);
             trackSpline = cycle.CreateSmoothedSpline(splineObject);
-            CenterSpline();
+            (Cycle, Cycle) offsetCycles = cycle.GetOffsetCycles(trackWidth/2);
+            rightSpline = offsetCycles.Item1.CreateSmoothedSpline(rightSplineObject);
+            leftSpline = offsetCycles.Item2.CreateSmoothedSpline(leftSplineObject);
+            //CenterSpline();
 
             CreateTrackMeshFromSplines();
+            GenerateCheckpoints();
+            
         }
 
         private void CreateTrackMeshFromSplines()
@@ -157,17 +208,22 @@ namespace Assets.TrackGeneration
                 Debug.LogError("Track material is not assigned!");
                 return;
             }
+            trackParameters = new TrackParameters(trackWidth, wallHeight, wallWidth, segments, banking);
+            trackMeshGenerator = new TrackMesh(trackParameters);
 
-            SplineTrackMeshGenerator trackGenerator = new SplineTrackMeshGenerator(
-                trackWidth,
-                wallHeight, // track wall height
-                wallWidth, // track wall width
-                segments,    // segments per unit
-                banking    // banking angle in degrees
-            );
-
-            GameObject generatedMesh = trackGenerator.GenerateTrackMesh(
-                                                                        trackSpline, trackMaterial, wallMaterial, wallPhysicsMaterial, startLineMaterial, gridMarkerMaterial,
+            //trackGenerator = new SplineTrackMeshGenerator(
+            //    trackWidth,
+            //    wallHeight, // track wall height
+            //    wallWidth, // track wall width
+            //    segments,    // segments per unit
+            //    banking    // banking angle in degrees
+            //);
+            List<SplineContainer> splines = new List<SplineContainer>();
+            splines.Add(leftSpline);
+            splines.Add(trackSpline);
+            splines.Add(rightSpline);
+            GameObject generatedMesh = trackMeshGenerator.GenerateTrackMesh(
+                                                                        splines, trackMaterial, wallMaterial, wallPhysicsMaterial, startLineMaterial, gridMarkerMaterial,
                                                                         out Vector3 startPos1, out Vector3 startPos2, out Quaternion startRot
                                                                         );
             startPosition1 = startPos1;
@@ -188,27 +244,13 @@ namespace Assets.TrackGeneration
 
         private void CenterSpline()
         {
-            if (trackSpline == null || trackSpline.Spline == null)
-                return;
-
-            // Find bounds of the spline
-            Vector3 min = Vector3.positiveInfinity;
-            Vector3 max = Vector3.negativeInfinity;
-            float step = 0.01f;  // Sample every 1% of the spline
-
-            for (float t = 0; t <= 1f; t += step)
-            {
-                Vector3 point = trackSpline.EvaluatePosition(t);
-                min = Vector3.Min(min, point);
-                max = Vector3.Max(max, point);
-            }
-
-            // Calculate center of the bounds
-            Vector3 center = (max + min) / 2f;
-            Vector3 offset = -center; // Offset to move to world origin
+            Vector3 center = GetTrackCenter();
+            
 
             // Move the spline container
-            splineObject.transform.position += offset;
+            splineObject.transform.position -= center;
+            rightSplineObject.transform.position -= center;
+            leftSplineObject.transform.position -= center;
         }
 
         public (Vector3 position1, Vector3 position2, Quaternion rotation) GetTrackStartTransform()
@@ -301,5 +343,39 @@ namespace Assets.TrackGeneration
             // Calculate center of the bounds
             return (max + min) / 2f;
         }
+
+        private void GenerateCheckpoints()
+        {
+            if (trackSpline == null || trackMesh == null) return;
+
+            // Sample points along the spline for checkpoint placement
+            List<Vector3> centerPoints = new List<Vector3>();
+            float step = 0.01f; // Sample every 1% of the spline
+
+            for (float t = 0; t <= 1f; t += step)
+            {
+                Vector3 point = trackSpline.EvaluatePosition(t);
+                centerPoints.Add(point);
+            }
+
+            // Generate checkpoints using the sampled points
+            checkpoints = CheckpointGenerator.GenerateCheckpoints(
+                centerPoints.ToArray(),
+                trackMesh,
+                checkpointSpacing,
+                checkpointWidth,
+                checkpointHeight
+            );
+
+
+            //Debug.Log($"Generated {checkpoints.Count} checkpoints");
+        }
+
+        public List<Checkpoint> GetCheckpoints()
+        {
+            return checkpoints;
+        }
+
+
     }
 }

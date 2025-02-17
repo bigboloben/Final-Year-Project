@@ -2,6 +2,9 @@ using UnityEngine;
 using UnityEngine.Splines;
 using System.Collections.Generic;
 using Unity.Mathematics;
+using System;
+using System.Diagnostics.CodeAnalysis;
+//using UnityEngine.Rendering.PostProcessing;
 
 
 namespace Assets.TrackGeneration
@@ -14,6 +17,7 @@ namespace Assets.TrackGeneration
         private int segmentsPerUnit;
         private float bankingAngle;
         private const float TRACK_HEIGHT_OFFSET = 0.1f;  // Consistent height offset for the entire track
+        List<Checkpoint> checkpoints;
 
         public class StartLineInfo
         {
@@ -32,13 +36,15 @@ namespace Assets.TrackGeneration
             bankingAngle = banking;
         }
 
-        public GameObject GenerateTrackMesh(SplineContainer spline, Material trackMaterial, Material wallMaterial, PhysicsMaterial wallPhysicsMaterial, Material startLineMaterial, Material gridMarkerMaterial, out Vector3 startPos1, out Vector3 startPos2, out Quaternion startRot)
+        public GameObject GenerateTrackMesh(List<SplineContainer> splines, Material trackMaterial, Material wallMaterial, PhysicsMaterial wallPhysicsMaterial, Material startLineMaterial, Material gridMarkerMaterial, out Vector3 startPos1, out Vector3 startPos2, out Quaternion startRot)
         {
             
 
             GameObject trackObject = new GameObject("Track");
-            List<Vector3[]> splinePoints = GenerateOffsetSplinesFromSplines(spline);
+            //List<Vector3[]> splinePoints = GenerateOffsetSplinesFromSplines(spline);
+            List<Vector3[]> splinePoints = GeneratePointsFromSplines(splines); 
             GameObject trackSurface = GenerateTrackSurface(splinePoints, trackMaterial);
+            List<Checkpoint> checkpoints = CheckpointGenerator.GenerateCheckpoints(splinePoints[1], trackObject);
             StartLineInfo startLineInfo = CreateStartFinishLine(splinePoints[1], startLineMaterial);
             GameObject leftWall = GenerateWall(splinePoints[0], wallMaterial, wallPhysicsMaterial);
             GameObject rightWall = GenerateWall(splinePoints[2], wallMaterial, wallPhysicsMaterial);
@@ -56,6 +62,85 @@ namespace Assets.TrackGeneration
 
             return trackObject;
         }
+
+        public List<Vector3[]> GeneratePointsFromSplines(List<SplineContainer> splines)
+        {
+            Spline leftSpline = splines[0].Spline;
+            Spline centerSpline = splines[1].Spline;
+            Spline rightSpline = splines[2].Spline;
+
+            List<Vector3[]> splinePoints = new List<Vector3[]>();
+
+            int numberOfPoints = Mathf.Max(32, (int)(centerSpline.GetLength() * segmentsPerUnit));
+            Vector3 heightOffset = -Vector3.down * TRACK_HEIGHT_OFFSET;
+
+            //Vector3[] leftPoints = GetPoints(leftSpline, numberOfPoints, heightOffset);
+            //Vector3[] centerPoints = GetPoints(centerSpline, numberOfPoints, heightOffset);
+            //Vector3[] rightPoints = GetPoints(rightSpline, numberOfPoints, heightOffset);
+
+            Vector3[] leftPoints = new Vector3[numberOfPoints];
+            Vector3[] centerPoints = new Vector3[numberOfPoints];
+            Vector3[] rightPoints = new Vector3[numberOfPoints];
+
+
+
+
+
+
+            float leftLength = leftSpline.GetLength();
+            float centerLength = centerSpline.GetLength();
+            float rightLength = rightSpline.GetLength();
+
+            SplineArcLengthTable leftTable = new SplineArcLengthTable(leftSpline);
+            SplineArcLengthTable centerTable = new SplineArcLengthTable(centerSpline);
+            SplineArcLengthTable rightTable = new SplineArcLengthTable(rightSpline);
+
+            for (int i = 0; i < numberOfPoints; i++)
+            {
+                float normalizedArcLength = i / (float)(numberOfPoints - 1); // 0 to 1
+
+                float tLeft = leftTable.ConvertLengthToT(normalizedArcLength * leftLength);
+                float tCenter = centerTable.ConvertLengthToT(normalizedArcLength * centerLength);
+                float tRight = rightTable.ConvertLengthToT(normalizedArcLength * rightLength);
+
+
+                float t = i / (float)(numberOfPoints - 1);  // This gives us values from 0 to 1
+                Vector3 leftPosition = leftSpline.EvaluatePosition(tLeft);
+                leftPosition += heightOffset;
+                leftPoints[i] = leftPosition;
+
+                Vector3 centerPosition = centerSpline.EvaluatePosition(tCenter);
+                centerPosition += heightOffset;
+                centerPoints[i] = centerPosition;
+
+                Vector3 rightPosition = rightSpline.EvaluatePosition(tRight);
+                rightPosition += heightOffset;
+                rightPoints[i] = rightPosition;
+            }
+
+            splinePoints.Add(leftPoints);
+            splinePoints.Add(centerPoints);
+            splinePoints.Add(rightPoints);
+
+
+            return splinePoints;
+        }
+
+        public Vector3[] GetPoints(Spline spline, int numberOfPoints, Vector3 heightOffset)
+        {
+            Vector3[] points = new Vector3[numberOfPoints];
+            float step = 1f / numberOfPoints;
+            int i = 0;
+            for (float t = 0; t <= 1; t += step, i++)
+            {
+                Vector3 position = spline.EvaluatePosition(t);
+                position += heightOffset;
+                points[i] = position;
+            }
+            return points;
+        }
+
+
 
         public GameObject CreateStartingGridMarkers(Vector3 pos1, Vector3 pos2, Quaternion rotation, Material material)
         {
@@ -174,55 +259,247 @@ namespace Assets.TrackGeneration
         {
             Spline centerSpline = centerSplineContainer.Spline;
 
-            //GameObject leftSplineObject = new GameObject("LeftSpline");
-            //GameObject rightSplineObject = new GameObject("RightSpline");
-            //SplineContainer leftSplineContainer = leftSplineObject.AddComponent<SplineContainer>();
-            //SplineContainer rightSplineContainer = rightSplineObject.AddComponent<SplineContainer>();
+            GameObject leftSplineObject = new GameObject("LeftSpline");
+            GameObject rightSplineObject = new GameObject("RightSpline");
+            GameObject centerSplineObject = new GameObject("CenterSpline");
+            SplineContainer leftSplineContainer = leftSplineObject.AddComponent<SplineContainer>();
+            SplineContainer splineContainer = centerSplineObject.AddComponent<SplineContainer>();
+            SplineContainer rightSplineContainer = rightSplineObject.AddComponent<SplineContainer>();
 
-            // Get references to the new splines
-            //Spline leftSpline = leftSplineContainer.Spline;
-            //Spline rightSpline = rightSplineContainer.Spline;
 
-            Spline leftSpline = new Spline();
-            Spline rightSpline = new Spline();
+            //Get references to the new splines
+            Spline leftSpline = leftSplineContainer.Spline;
+            Spline rightSpline = rightSplineContainer.Spline;
+            Spline spline = splineContainer.Spline;
+
+            //Spline leftSpline = new Spline();
+            //Spline rightSpline = new Spline();
 
             // Clear any default knots
             leftSpline.Clear();
             rightSpline.Clear();
+            spline.Clear();
+
+            List<int> leftDeleted = new List<int>();
+            List<int> rightDeleted = new List<int>();
+
+            float curveThreshold = 0.24f;
 
             for (int i = 0; i < centerSpline.Count; i++)
             {
                 // Create knots for both sides
                 BezierKnot leftKnot = centerSpline[i];
+                BezierKnot nextLeftKnot = centerSpline[(i + 1) % centerSpline.Count];
+                BezierKnot prevLeftKnot = centerSpline[(i - 1 + centerSpline.Count) % centerSpline.Count];
                 BezierKnot rightKnot = centerSpline[i];
+                BezierKnot nextRightKnot = centerSpline[(i + 1) % centerSpline.Count];
+                BezierKnot prevRightKnot = centerSpline[(i - 1 + centerSpline.Count) % centerSpline.Count];
+
 
                 // Calculate offset directions
                 Vector3 tangent = ((Vector3)leftKnot.TangentOut).normalized;
                 Vector3 up = Vector3.up;
                 float3 rightVector = Vector3.Cross(up, tangent).normalized;
 
+                Vector3 nextTangent = ((Vector3)nextLeftKnot.TangentOut).normalized;
+                float3 nextRightVector = Vector3.Cross(up, nextTangent).normalized;
+
+                Vector3 prevTangent = ((Vector3)prevLeftKnot.TangentOut).normalized;
+                float3 prevRightVector = Vector3.Cross(up, prevTangent).normalized;
+
                 // Apply offsets
                 leftKnot.Position -= rightVector * trackWidth / 2;
                 rightKnot.Position += rightVector * trackWidth / 2;
 
-                float innerScale = (centerSpline.Count - trackWidth / 2) / centerSpline.Count;
-                float outerScale = (centerSpline.Count + trackWidth / 2) / centerSpline.Count;
+                nextLeftKnot.Position -= nextRightVector * trackWidth / 2;
+                nextRightKnot.Position += nextRightVector * trackWidth / 2;
 
-                leftKnot.TangentIn *= innerScale;
-                leftKnot.TangentOut *= innerScale;
+                prevLeftKnot.Position -= prevRightVector * trackWidth / 2;
+                prevRightKnot.Position += prevRightVector * trackWidth / 2;
 
-                rightKnot.TangentIn *= outerScale;
-                rightKnot.TangentOut *= outerScale;
+                Vector3 averageTangent = GetTangent(centerSpline, i);
+                Vector3 curvature = GetCurvature(centerSpline, i);
+
+                // Cross product to determine turning direction
+                float direction = Vector3.Cross(averageTangent, curvature).y;
+
+                float nextLeftDistance = Vector3.Distance(leftKnot.Position, nextLeftKnot.Position);
+                float nextRightDistance = Vector3.Distance(rightKnot.Position, nextRightKnot.Position);
+                float nextOriginalDistance = Vector3.Distance(centerSpline[i].Position, centerSpline[(i+1)%centerSpline.Count].Position);
+
+                float outLeftScale = nextLeftDistance / nextOriginalDistance;
+                float outRightScale = nextRightDistance / nextOriginalDistance;
+
+                float prevLeftDistance = Vector3.Distance(leftKnot.Position, prevLeftKnot.Position);
+                float prevRightDistance = Vector3.Distance(rightKnot.Position, prevRightKnot.Position);
+                float prevOriginalDistance = Vector3.Distance(centerSpline[i].Position, centerSpline[(i - 1 + centerSpline.Count) % centerSpline.Count].Position);
+
+                float inLeftScale = prevLeftDistance / prevOriginalDistance;
+                float inRightScale = prevRightDistance / prevOriginalDistance;
+
+                Debug.LogError($"knot {i} next distances {nextLeftDistance}, {nextRightDistance}, {nextOriginalDistance}");
+                Debug.LogError($"knot {i} prev distances {prevLeftDistance}, {prevRightDistance}, {prevOriginalDistance}");
+                Debug.LogError($"knot {i} curvature {curvature} magnitude {curvature.magnitude}");
+
+                leftKnot.TangentIn *= inLeftScale;
+                leftKnot.TangentOut *= outLeftScale;
+
+                rightKnot.TangentIn *= inRightScale;
+                rightKnot.TangentOut *= inRightScale;
+
+                bool rightAuto = false;
+                bool leftAuto = false;
+
+                if (direction < 0 && curvature.magnitude > curveThreshold)
+                    {
+                        float inLength = ((Vector3)rightKnot.TangentIn).magnitude;
+                        float outLength = ((Vector3)rightKnot.TangentOut).magnitude;
+
+                        float3 shiftDirection;
+                        float shiftDistance;
+
+                        if (inLength < outLength)
+                        {
+                            // Shift towards previous point
+                            shiftDirection = ((Vector3)prevRightKnot.Position - (Vector3)rightKnot.Position).normalized;
+                            shiftDistance = inLength * 0.1f;
+                            rightKnot.Position += shiftDirection * shiftDistance;
+                        
+
+                            
+                        }
+                        else
+                        {
+                            // Shift towards next point
+                            shiftDirection = ((Vector3)nextRightKnot.Position - (Vector3)rightKnot.Position).normalized;
+                            shiftDistance = outLength * 0.1f;
+                            rightKnot.Position += shiftDirection * shiftDistance;
+
+                           
+                        }
+                    rightKnot.TangentIn *= 0.5f;
+                    rightKnot.TangentOut *= 0.5f;
+
+                    rightAuto = true;
+
+                    leftKnot.TangentIn *= 1.2f;
+                    leftKnot.TangentOut *= 1.2f;
+
+                    LimitTangentLength(ref rightKnot, prevRightKnot.Position, nextRightKnot.Position);
+                    PreventTangentCrossover(ref rightKnot);
+                }
+                else if (direction > 0 && curvature.magnitude > curveThreshold)
+                    {
+                        float inLength = ((Vector3)leftKnot.TangentIn).magnitude;
+                        float outLength = ((Vector3)leftKnot.TangentOut).magnitude;
+
+                        float3 shiftDirection;
+                        float shiftDistance;
+
+                        if (inLength < outLength)
+                        {
+                            // Shift towards previous point
+                            shiftDirection = ((Vector3)prevLeftKnot.Position - (Vector3)leftKnot.Position).normalized;
+                            shiftDistance = inLength * 0.2f; // Adjust factor as needed
+                            leftKnot.Position += shiftDirection * shiftDistance;
+
+                            
+                        }
+                        else
+                        {
+                            // Shift towards next point
+                            shiftDirection = ((Vector3)nextLeftKnot.Position - (Vector3)leftKnot.Position).normalized;
+                            shiftDistance = outLength * 0.2f;
+                            leftKnot.Position += shiftDirection * shiftDistance;
+
+                           
+                        }
+                    leftKnot.TangentIn *= 0.5f;
+                    leftKnot.TangentOut *= 0.5f;
+
+                    leftAuto = true;
+
+                    rightKnot.TangentIn *= 1.2f;
+                    rightKnot.TangentOut *= 1.2f;
+
+                    LimitTangentLength(ref leftKnot, prevLeftKnot.Position, nextLeftKnot.Position);
+                    PreventTangentCrossover(ref leftKnot);
+                }
+                else if (direction < 0 && curvature.magnitude < curveThreshold)
+                {
+                    rightKnot.TangentIn *= 0.9f;
+                    rightKnot.TangentOut *= 0.9f;
+
+                    leftKnot.TangentIn += 1.1f;
+                    leftKnot.TangentOut += 1.1f;
+
+                }
+                else if (direction > 0 && curvature.magnitude < curveThreshold)
+                {
+                    rightKnot.TangentIn *= 1.1f;
+                    rightKnot.TangentOut *= 1.1f;
+
+                    leftKnot.TangentIn *= 0.9f;
+                    leftKnot.TangentOut *= 0.9f;
+                    
+                }
+
 
 
                 // Add knots to the new splines
-                leftSpline.Add(leftKnot);
-                rightSpline.Add(rightKnot);
+
+                spline.Add(centerSpline[i]);
+
+
+                if (rightAuto) 
+                {
+                    leftSpline.Add(leftKnot);
+                    rightDeleted.Add(i);
+
+                    
+
+
+                }
+                else if (leftAuto) 
+                {
+                    rightSpline.Add(rightKnot);
+                    leftDeleted.Add(i);
+
+                    
+                }
+                else
+                {
+                    rightSpline.Add(rightKnot);
+                    leftSpline.Add(leftKnot);
+                }
 
             }
             leftSpline.Closed = true;
             rightSpline.Closed = true;
             centerSpline.Closed = true;
+
+            foreach (int i in leftDeleted)
+            {
+                Debug.LogError($"deleted {i}");
+                BezierKnot tempPrevLeft = leftSpline[(i - 1 + leftSpline.Count) % leftSpline.Count];
+                tempPrevLeft.TangentOut *= 1.7f;
+                leftSpline[(i - 1 + leftSpline.Count) % leftSpline.Count] = tempPrevLeft;
+                BezierKnot tempNextLeft = leftSpline[(i)%leftSpline.Count];
+                tempNextLeft.TangentIn *= 1.7f;
+                leftSpline[(i) % leftSpline.Count] = tempNextLeft;
+            }
+            foreach (int i in rightDeleted)
+            {
+                Debug.LogError($"deleted {i}");
+                BezierKnot tempPrevRight = rightSpline[(i - 1 + rightSpline.Count) % rightSpline.Count];
+                tempPrevRight.TangentOut *= 1.7f;
+                rightSpline[(i - 1 + rightSpline.Count) % rightSpline.Count] = tempPrevRight;
+                BezierKnot tempNextRight = rightSpline[(i) % rightSpline.Count];
+                tempNextRight.TangentIn *= 1.7f;
+                rightSpline[(i) % rightSpline.Count] = tempNextRight;
+            }
+
+
 
             List<Vector3[]> splinePoints = new List<Vector3[]>();
 
@@ -256,25 +533,101 @@ namespace Assets.TrackGeneration
             return splinePoints;
         }
 
+        void LimitTangentLength(ref BezierKnot knot, Vector3 prevPos, Vector3 nextPos)
+        {
+            float distToPrev = Vector3.Distance(knot.Position, prevPos);
+            float distToNext = Vector3.Distance(knot.Position, nextPos);
+
+            float maxInLength = distToPrev * 0.33f;  // Use 1/3 of distance as max length
+            float maxOutLength = distToNext * 0.33f;
+
+            if (((Vector3)knot.TangentIn).magnitude > maxInLength)
+            {
+                knot.TangentIn = ((Vector3)knot.TangentIn).normalized * maxInLength;
+            }
+
+            if (((Vector3)knot.TangentOut).magnitude > maxOutLength)
+            {
+                knot.TangentOut = ((Vector3)knot.TangentOut).normalized * maxOutLength;
+            }
+        }
+
+        void PreventTangentCrossover(ref BezierKnot knot)
+        {
+            Vector3 inDir = ((Vector3)knot.TangentIn).normalized;
+            Vector3 outDir = ((Vector3)knot.TangentOut).normalized;
+
+            float dot = Vector3.Dot(inDir, outDir);
+            if (dot < -0.7f)  // Tangents are pointing in nearly opposite directions
+            {
+                // Reduce both tangents to prevent crossover
+                float reduction = 0.5f;
+                knot.TangentIn *= reduction;
+                knot.TangentOut *= reduction;
+            }
+        }
+
+        Vector3 GetTangent(Spline spline, int index)
+        {
+            int prevIndex = (index - 1 + spline.Count) % spline.Count;
+            int nextIndex = (index + 1) % spline.Count;
+
+            Vector3 prevPos = spline[prevIndex].Position;
+            Vector3 nextPos = spline[nextIndex].Position;
+
+            return (nextPos - prevPos).normalized; // Approximate tangent
+        }
+
+        Vector3 GetCurvature(Spline spline, int index)
+        {
+            BezierKnot currentKnot = spline[index];
+            BezierKnot nextKnot = spline[(index + 1) % spline.Count];
+            BezierKnot prevKnot = spline[(index - 1 + spline.Count) % spline.Count]; // Handle looping
+
+            // Compute direct vectors
+            Vector3 directNext = nextKnot.Position - currentKnot.Position;
+            Vector3 directPrev = currentKnot.Position - prevKnot.Position;
+
+            float directNextDist = directNext.magnitude;
+            float directPrevDist = directPrev.magnitude;
+
+            // Get control point deviations (outgoing and incoming)
+            float3 outControl = currentKnot.Position + currentKnot.TangentOut;
+            float3 inControlNext = nextKnot.Position + nextKnot.TangentIn;
+            float3 inControlCurrent = currentKnot.Position + currentKnot.TangentIn;
+            float3 outControlPrev = prevKnot.Position + prevKnot.TangentOut;
+
+            // Compute deviations from the direct paths
+            Vector3 normalizedNextPath = directNext.normalized;
+            Vector3 normalizedPrevPath = directPrev.normalized;
+
+            float outDeviation = Vector3.Cross(outControl - currentKnot.Position, normalizedNextPath).magnitude;
+            float inDeviationNext = Vector3.Cross(inControlNext - nextKnot.Position, normalizedNextPath).magnitude;
+            float inDeviationPrev = Vector3.Cross(inControlCurrent - currentKnot.Position, normalizedPrevPath).magnitude;
+            float outDeviationPrev = Vector3.Cross(outControlPrev - prevKnot.Position, normalizedPrevPath).magnitude;
+
+            // Average the curvature contribution from both sides
+            float curvatureMagnitude =
+                ((outDeviation + inDeviationNext) / directNextDist + (outDeviationPrev + inDeviationPrev) / directPrevDist) * 0.5f;
+
+            // Direction from the midpoint to the control point averages
+            Vector3 midPoint = (prevKnot.Position + nextKnot.Position) * 0.5f;
+            Vector3 controlMidPoint = (outControl + inControlNext + inControlCurrent + outControlPrev) * 0.25f;
+
+            return (controlMidPoint - midPoint).normalized * curvatureMagnitude;
+        }
 
         private List<Vector3[]> GenerateOffsetSplines(SplineContainer centerSpline)
         {
             List<Vector3[]> splinePoints = new List<Vector3[]>();
             int pointCount = Mathf.Max(32, (int)(centerSpline.Spline.GetLength() * segmentsPerUnit));
-
             Vector3[] leftPoints = new Vector3[pointCount];
             Vector3[] centerPoints = new Vector3[pointCount];
             Vector3[] rightPoints = new Vector3[pointCount];
-
-
             // Get initial spline information
             float baseHeight = centerSpline.EvaluatePosition(0).y;
-
             float leftWidth = trackWidth;
             float rightWidth = trackWidth;
-
-
-
             for (int i = 0; i < pointCount; i++)
             {
                 float t = i / (float)(pointCount - 1);
@@ -283,19 +636,13 @@ namespace Assets.TrackGeneration
                 Vector3 up = Vector3.up;
                 Vector3 right = Vector3.Cross(tangent, up).normalized;
 
-                
                 float curvature = CalculateCurvature(centerSpline, t);
                 //// Apply banking rotation based on curvature
                 //float bankAngle = curvature * bankingAngle;
                 //Quaternion bankRotation = Quaternion.AngleAxis(bankAngle, tangent);
-
                 //// Rotate the right and up vectors
                 //right = bankRotation * right;
                 //up = bankRotation * up;
-
-
-
-
                 //if (curvature < 0)
                 //{
                 //    leftWidth = trackWidth + (Mathf.Abs(curvature) * 0.5f);
@@ -311,23 +658,19 @@ namespace Assets.TrackGeneration
                 //    rightWidth = trackWidth;
                 //    leftWidth = trackWidth;
                 //}
-
-
-
                 // Apply the consistent height offset and banking
                 Vector3 heightOffset = up * TRACK_HEIGHT_OFFSET;
-
                 centerPoints[i] = position + heightOffset;
                 leftPoints[i] = position - right * (leftWidth / 2) + heightOffset;
                 rightPoints[i] = position + right * (rightWidth / 2) + heightOffset;
             }
-
             splinePoints.Add(leftPoints);
             splinePoints.Add(centerPoints);
             splinePoints.Add(rightPoints);
-
             return splinePoints;
         }
+
+
         //private float CalculateCurvature(SplineContainer spline, float t)
         //{
         //    // Use three points to calculate curvature

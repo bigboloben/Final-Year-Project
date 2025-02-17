@@ -126,76 +126,129 @@ namespace Assets.TrackGeneration
             return Vector2.zero;
         }
 
-        public List<Vector2> GetSmoothedPoints(int numberOfPoints)
+        //public List<Vector2> GetSmoothedPoints(int numberOfPoints)
+        //{
+        //    List<Vector2> curvePoints = new List<Vector2>();
+        //    Points.RemoveAt(Points.Count - 1);
+        //    //curvePoints.Capacity = Points.Count * numberOfPoints;
+        //    for (int i = 0; i < Points.Count; i++)
+        //    {
+        //        //i %= Points.Count;
+        //        List<Vector2> controlPoints = new List<Vector2>();
+        //        int h = (int) Mathf.Repeat(i - 1, Points.Count);
+        //        int j = (int) Mathf.Repeat(i + 1, Points.Count);
+        //        //Debug.Log($"h{h}, i{i}, j{j}");
+        //        Vector2 v0 = Points[h];
+        //        Vector2 v1 = Points[i];
+        //        Vector2 v2 = Points[j];
+
+        //        controlPoints = GetControlPoints(v0, v1, v2);
+        //        //Debug.Log($"v0{v0.ToString()}, v1{v1.ToString()}, v2{v2.ToString()}");
+        //        curvePoints.AddRange(GetBezierCurve(controlPoints[0], controlPoints[1], controlPoints[2], controlPoints[3], numberOfPoints));
+
+        //    }
+        //    //Debug.Log($"Points: {string.Join(", ", Points.Select(p => $"({p.x}, {p.y})"))}");
+        //    Points = curvePoints;
+        //    //Debug.Log($"Points: {string.Join(", ", Points.Select(p => $"({p.x}, {p.y})"))}");
+        //    return curvePoints;
+        //}
+
+        //public List<Vector2> GetControlPoints(Vector2 v0, Vector2 v1, Vector2 v2)
+        //{
+        //    float pointRatio = 0.6f;
+        //    float controlRatio = 0.8f;
+        //    if (CalculateAngle(v0, v1, v2) < 50)
+        //    {
+        //        pointRatio = 0.5f;
+        //        controlRatio = 0.55f;
+        //    } 
+        //    Vector2 p0 = Vector2.Lerp(v0, v1, pointRatio);
+        //    Vector2 p1 = Vector2.Lerp(v0, v1, controlRatio);
+
+        //    Vector2 p2 = Vector2.Lerp(v2, v1, controlRatio);
+        //    Vector2 p3 = Vector2.Lerp(v2, v1, pointRatio);
+
+        //    return new List<Vector2> { p0, p1, p2, p3 };
+        //}
+
+        //public List<Vector2> GetBezierCurve(Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3, int numberOfPoints)
+        //{
+        //    List<Vector2> curvePoints = new List<Vector2>();
+        //    float step = (1 / (float)numberOfPoints);
+        //    //Debug.Log(step);
+        //    for (float t = 0; t <= 1; t += step)
+        //    {
+        //        Vector2 A = Vector2.Lerp(p0, p1, t);
+        //        Vector2 B = Vector2.Lerp(p1, p2, t);
+        //        Vector2 C = Vector2.Lerp(p2, p3, t);
+
+        //        Vector2 D = Vector2.Lerp(A, B, t);
+        //        Vector2 E = Vector2.Lerp(B, C, t);
+
+        //        Vector2 curvePoint = Vector2.Lerp(D, E, t);
+
+        //        curvePoints.Add(curvePoint);
+        //    }
+        //    return curvePoints;
+        //}
+        public List<Vector2> GetOffsetPoints(float offsetDistance, bool inner = false)
         {
-            List<Vector2> curvePoints = new List<Vector2>();
-            Points.RemoveAt(Points.Count - 1);
-            //curvePoints.Capacity = Points.Count * numberOfPoints;
+            if (Points.Count < 3)
+                return new List<Vector2>();
+
+            List<Vector2> offsetPoints = new List<Vector2>();
+
             for (int i = 0; i < Points.Count; i++)
             {
-                //i %= Points.Count;
-                List<Vector2> controlPoints = new List<Vector2>();
-                int h = (int) Mathf.Repeat(i - 1, Points.Count);
-                int j = (int) Mathf.Repeat(i + 1, Points.Count);
-                //Debug.Log($"h{h}, i{i}, j{j}");
-                Vector2 v0 = Points[h];
-                Vector2 v1 = Points[i];
-                Vector2 v2 = Points[j];
+                // Get current point and its neighbors
+                Vector2 prev = Points[(i - 1 + Points.Count) % Points.Count];
+                Vector2 curr = Points[i];
+                Vector2 next = Points[(i + 1) % Points.Count];
 
-                controlPoints = GetControlPoints(v0, v1, v2);
-                //Debug.Log($"v0{v0.ToString()}, v1{v1.ToString()}, v2{v2.ToString()}");
-                curvePoints.AddRange(GetBezierCurve(controlPoints[0], controlPoints[1], controlPoints[2], controlPoints[3], numberOfPoints));
+                // Calculate edge vectors
+                Vector2 v1 = (curr - prev).normalized;
+                Vector2 v2 = (next - curr).normalized;
 
+                // Calculate normals (rotate vectors 90 degrees clockwise)
+                Vector2 na = new Vector2(v1.y, -v1.x);
+                Vector2 nb = new Vector2(v2.y, -v2.x);
+
+                // Calculate bisector vector
+                Vector2 bis = (na + nb).normalized;
+
+                // Calculate the length needed along the bisector
+                float dotProduct = Vector2.Dot(na, nb);
+                float length = offsetDistance / Mathf.Sqrt((1 + dotProduct) / 2);
+
+                // If we want inner offset, reverse the direction
+                if (inner)
+                    length = -length;
+
+                // Calculate offset point
+                Vector2 offsetPoint = curr + length * bis;
+                offsetPoints.Add(offsetPoint);
             }
-            //Debug.Log($"Points: {string.Join(", ", Points.Select(p => $"({p.x}, {p.y})"))}");
-            Points = curvePoints;
-            //Debug.Log($"Points: {string.Join(", ", Points.Select(p => $"({p.x}, {p.y})"))}");
-            return curvePoints;
+
+           
+
+
+            return offsetPoints;
         }
 
-        public List<Vector2> GetControlPoints(Vector2 v0, Vector2 v1, Vector2 v2)
+        // Helper method to create both inner and outer offset cycles
+        public (Cycle inner, Cycle outer) GetOffsetCycles(float offsetDistance)
         {
-            float pointRatio = 0.6f;
-            float controlRatio = 0.8f;
-            if (CalculateAngle(v0, v1, v2) < 50)
-            {
-                pointRatio = 0.5f;
-                controlRatio = 0.55f;
-            } 
-            Vector2 p0 = Vector2.Lerp(v0, v1, pointRatio);
-            Vector2 p1 = Vector2.Lerp(v0, v1, controlRatio);
+            var innerPoints = GetOffsetPoints(offsetDistance, true);
+            var outerPoints = GetOffsetPoints(offsetDistance, false);
 
-            Vector2 p2 = Vector2.Lerp(v2, v1, controlRatio);
-            Vector2 p3 = Vector2.Lerp(v2, v1, pointRatio);
-
-            return new List<Vector2> { p0, p1, p2, p3 };
+            return (new Cycle(innerPoints), new Cycle(outerPoints));
         }
 
-        public List<Vector2> GetBezierCurve(Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3, int numberOfPoints)
+
+        public SplineContainer CreateSmoothedSpline(GameObject targetObject, List<float> heights = null, float distance = 0.6f, float length = 0.8f)
         {
-            List<Vector2> curvePoints = new List<Vector2>();
-            float step = (1 / (float)numberOfPoints);
-            //Debug.Log(step);
-            for (float t = 0; t <= 1; t += step)
-            {
-                Vector2 A = Vector2.Lerp(p0, p1, t);
-                Vector2 B = Vector2.Lerp(p1, p2, t);
-                Vector2 C = Vector2.Lerp(p2, p3, t);
-
-                Vector2 D = Vector2.Lerp(A, B, t);
-                Vector2 E = Vector2.Lerp(B, C, t);
-
-                Vector2 curvePoint = Vector2.Lerp(D, E, t);
-
-                curvePoints.Add(curvePoint);
-            }
-            return curvePoints;
-        }
-
-        public SplineContainer CreateSmoothedSpline(GameObject targetObject, List<float> heights = null)
-        {
-            // Remove last point since we're making a closed loop
-            Points.RemoveAt(Points.Count - 1);
+            
+            
             SplineContainer splineContainer = targetObject.GetComponent<SplineContainer>();
             if (splineContainer == null)
             {
@@ -221,10 +274,10 @@ namespace Assets.TrackGeneration
                 Vector2 v0 = Points[h];
                 Vector2 v1 = Points[i];
                 Vector2 v2 = Points[j];
-                Vector2 knotPointA = GetKnotPoints(v0, v1);
-                Vector2 knotPointB = GetKnotPoints(v2, v1);
-                Vector2 outTangentA = GetTangent(v0, v1, knotPointA);
-                Vector2 inTangentB = GetTangent(v2, v1, knotPointB);
+                Vector2 knotPointA = GetKnotPoints(v0, v1, distance);
+                Vector2 knotPointB = GetKnotPoints(v2, v1, distance);
+                Vector2 outTangentA = GetTangent(v0, v1, knotPointA, length);
+                Vector2 inTangentB = GetTangent(v2, v1, knotPointB, length);
                 Vector2 inTangentA = -outTangentA;
                 Vector2 outTangentB = -inTangentB;
 
@@ -236,7 +289,8 @@ namespace Assets.TrackGeneration
                 BezierKnot knotA = new BezierKnot
                 (
                     new float3(knotPointA.x, heightA, knotPointA.y),
-                    new float3(inTangentA.x, heightA, inTangentA.y),
+                    new float3(inTangentA.x * 0.1f, heightA, inTangentA.y * 0.1f),
+                    //new float3(Vector3.zero.x, heightA, Vector3.zero.z),
                     new float3(outTangentA.x, heightA, outTangentA.y)
                 );
 
@@ -244,7 +298,8 @@ namespace Assets.TrackGeneration
                 (
                     new float3(knotPointB.x, heightB, knotPointB.y),
                     new float3(inTangentB.x, heightB, inTangentB.y),
-                    new float3(outTangentB.x, heightB, outTangentB.y)
+                    new float3(outTangentB.x * 0.1f, heightB, outTangentB.y * 0.1f)
+                    //new float3(Vector3.zero.x, heightA, Vector3.zero.z)
                 );
 
                 spline.Add(knotA);
@@ -256,7 +311,7 @@ namespace Assets.TrackGeneration
             return splineContainer;
         }
 
-        public List<float> GeneratePerlinHeights(int numKnots, float minHeight = 0f, float maxHeight = 10f, float noiseScale = 0.3f)
+        public List<float> GeneratePerlinHeights(int numKnots, float minHeight = 0f, float maxHeight = 1f, float noiseScale = 0.3f)
         {
             List<float> heights = new List<float>();
 
@@ -274,14 +329,14 @@ namespace Assets.TrackGeneration
             return heights;
         }
 
-        public Vector2 GetKnotPoints(Vector2 a, Vector2 b)
+        public Vector2 GetKnotPoints(Vector2 a, Vector2 b, float distance)
         {
-            return Vector2.Lerp(a, b, 0.6f);
+            return Vector2.Lerp(a, b, distance);
         }
 
-        public Vector2 GetTangent(Vector2 a, Vector2 b, Vector2 knot)
+        public Vector2 GetTangent(Vector2 a, Vector2 b, Vector2 knot, float length)
         {
-            Vector2 controlPoint = Vector2.Lerp(a,b,0.8f);
+            Vector2 controlPoint = Vector2.Lerp(a, b, length);
             Vector2 tangent = controlPoint - knot;
             return tangent;
         }
@@ -299,6 +354,32 @@ namespace Assets.TrackGeneration
             }
 
             return points;
+        }
+
+        public void FindLongestSegmentAndSetStart()
+        {
+            Points.RemoveAt(Points.Count - 1);
+            float maxLength = 0;
+            int startIndex = 0;
+
+            for (int i = 0; i < Points.Count - 1; i++)
+            {
+                Vector2 current = Points[i];
+                Vector2 next = Points[(i + 1) % Points.Count];
+
+                float segmentLength = Vector2.Distance(current, next);
+                if (segmentLength > maxLength)
+                {
+                    maxLength = segmentLength;
+                    startIndex = (i+1)%Points.Count;
+                }
+            }
+            List<Vector2> reorderedPoints = new List<Vector2>();
+            for (int i = 0; i < Points.Count; i++)
+            {
+                reorderedPoints.Add(Points[(startIndex + i) % Points.Count]);
+            }
+            Points = reorderedPoints;
         }
     }
 }

@@ -5,7 +5,8 @@ using UnityEngine.UIElements;
 
 public class CarControlScript : MonoBehaviour
 {
-    public Track3DVisualizer trackGenerator;
+    public TrackHandler trackHandler;
+    //private CheckpointManager checkpointManager;
 
     CarControls controls;
     private float accelerationInput;
@@ -65,6 +66,7 @@ public class CarControlScript : MonoBehaviour
     public float[] boostThresholds = { 1f, 2f, 3f }; // Time thresholds for boost levels
     private float boostTimeRemaining;
 
+
     void Awake()
     {
         InitializeControls();
@@ -102,10 +104,7 @@ public class CarControlScript : MonoBehaviour
         }
     }
 
-    //private void OnDestroy()
-    //{
-    //    controls.Dispose();
-    //}
+    
 
     private void InitializeControls()
     {
@@ -215,14 +214,13 @@ public class CarControlScript : MonoBehaviour
             spherePhysicMaterial.bounceCombine = PhysicsMaterialCombine.Minimum;
         }
 
-        if (trackGenerator != null)
+        if (trackHandler != null)
         {
-            var (startPos1, startPos2, startRot) = trackGenerator.GetTrackStartTransform();
+            var (startPos1, startPos2, startRot) = trackHandler.GetTrackStartTransform();
             transform.position = startPos1;
             transform.rotation = startRot;
         }
     }
-
 
 
     void FixedUpdate()
@@ -304,49 +302,48 @@ public class CarControlScript : MonoBehaviour
         if (vehicleModel == null) return;
 
         float lateralVelocity = Vector3.Dot(sphereRb.linearVelocity, carBodyTransform.right);
-        
-        targetRoll = lateralVelocity * bodyRollForce;
 
+        targetRoll = lateralVelocity * bodyRollForce;
         targetRoll += steeringInput * bodyRollForce * (sphereRb.linearVelocity.magnitude / maxVelocity);
         targetRoll = Mathf.Clamp(targetRoll, -8, 8);
         currentRoll = Mathf.Lerp(currentRoll, targetRoll, Time.deltaTime * bodyRollSpeed);
 
-
         float forwardVelocity = Vector3.Dot(sphereRb.linearVelocity, carBodyTransform.forward);
         float speedRatio = 1 - (sphereRb.linearVelocity.magnitude / maxVelocity);
+
+        // Calculate base lean from acceleration/reverse
         targetLean = (accelerationInput - reverseInput) * bodyRollForce * speedRatio;
-        targetLean = Mathf.Clamp(targetLean, -8, 8);
+
+        // Add extra backward lean during boost
+        if (boostTimeRemaining > 0 && !isDrifting && accelerationInput > 0.01f)
+        {
+            float boostLeanIntensity = 15f; // Negative value for backward lean
+            float boostRatio = boostTimeRemaining / maxBoostTime; // Gradually reduce lean as boost runs out
+            targetLean += boostLeanIntensity * boostRatio;
+        }
+
+        targetLean = Mathf.Clamp(targetLean, -15, 8); // Increased negative range for backward lean
         currentLean = Mathf.Lerp(currentLean, targetLean, Time.deltaTime * bodyRollSpeed);
 
         Vector3 currentRotation = vehicleModel.localEulerAngles;
 
         Quaternion targetRotation = Quaternion.Euler(
-            currentLean, // Slight pitch based on speed
+            currentLean,
             currentRotation.y,
             currentRoll
         );
 
         Quaternion smoothRotation = Quaternion.Lerp(vehicleModel.localRotation, targetRotation, Time.deltaTime * bodyRollSpeed);
-        //Quaternion counterRoll = Quaternion.Euler(0, 0, 0);
+        vehicleModel.localRotation = smoothRotation;
 
-        vehicleModel.localRotation =  smoothRotation;
         float width = 0.3f;
-
-        // Calculate lateral offset based on roll angle (along x-axis)
-        //Debug.LogError($"Angle {currentRoll}");
         float lateralOffset = width * (Mathf.Sin(Mathf.Deg2Rad * currentRoll));
-        //if (currentRoll > 0)
-        //{
-        //    lateralOffset = -lateralOffset;
-        //}
-        //Debug.LogError($"Offset {lateralOffset}");
 
-        // right 1, 3       left 0, 2
         for (int i = 0; i < 4; i++)
         {
-            float tempLat = lateralOffset; 
+            float tempLat = lateralOffset;
             Vector3 wheelPosition = wheelDefaultPositions[i];
-            if (currentRoll > 0 && (i==1 || i==3))
+            if (currentRoll > 0 && (i == 1 || i == 3))
             {
                 tempLat *= 2f;
             }
@@ -355,20 +352,16 @@ public class CarControlScript : MonoBehaviour
                 tempLat *= 2f;
             }
 
-            // Apply lateral offset to the wheel's local position
             wheelTransforms[i].localPosition = new Vector3(
                 wheelDefaultPositions[i].x + tempLat,
                 wheelDefaultPositions[i].y,
                 wheelDefaultPositions[i].z
             );
 
-            // Reset wheel rotation to prevent tilting
             wheelTransforms[i].localRotation = wheelDefaultRotations[i];
         }
-
-
     }
-    
+
 
 
     private void TryStartDrift()
@@ -549,11 +542,20 @@ public class CarControlScript : MonoBehaviour
 
     void ResetPosition()
     {
-        if (trackGenerator != null)
+        if (trackHandler != null)
         {
-            var (startPos1, startPos2, startRot) = trackGenerator.GetTrackStartTransform();
+            var (startPos1, startPos2, startRot) = trackHandler.GetTrackStartTransform();
             transform.position = startPos1;
             transform.rotation = startRot;
         }
+    }
+
+    public float GetCurrentSpeed()
+    {
+        if (sphereRb != null)
+        {
+            return sphereRb.linearVelocity.magnitude;
+        }
+        return 0f;
     }
 }
