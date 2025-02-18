@@ -70,7 +70,9 @@
     <Compile Include="Assets\TrackGeneration\Track Mesh.cs" />
     <Compile Include="Assets\Samples\Universal RP\17.0.3\URP RenderGraph Samples\MRT\MrtRendererFeature.cs" />
     <Compile Include="Assets\Noise Test.cs" />
+    <Compile Include="Assets\TrackGeneration\Floor Generation.cs" />
     <Compile Include="Assets\TrackGeneration\Checkpoints.cs" />
+    <Compile Include="Assets\PlaneGen.cs" />
     <Compile Include="Assets\TrackGeneration\TrackHandler.cs" />
     <Compile Include="Assets\TrackGeneration\TrackMeshGenerator.cs" />
     <Compile Include="Assets\TrackGeneration\PointGeneration.cs" />

@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Linq.Expressions;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Splines;
 
@@ -27,15 +29,47 @@ namespace Assets.TrackGeneration
             List<Vector3> centerPointsList = new List<Vector3>();
             List<Vector3> rightPointsList = new List<Vector3>();
 
+            float3 heightOffset = TrackParameters.TRACK_HEIGHT_OFFSET * Vector3.up;
+
+            
+
             for (int i = 0; i < centerSegments.Count; i++)
             {
                 int numberOfPoints = Mathf.Max(32, (int)(centerSegments[i].GetLength() * parameters.SegmentsPerUnit));
+
+                
+                float lengthDiff = Mathf.Abs(leftSegments[i].GetLength() - rightSegments[i].GetLength());
+                float maxHeight = 0.2f * lengthDiff;
+                float3 rightHeightOffset;
+                float3 leftHeightOffset;
+                //Debug.Log(maxHeight);
+
                 for (int j = 0; j < numberOfPoints - 1; j++)
                 {
                     float t = j / (float)(numberOfPoints - 1);
-                    leftPointsList.Add(leftSegments[i].EvaluatePosition(t));
-                    centerPointsList.Add(centerSegments[i].EvaluatePosition(t));
-                    rightPointsList.Add(rightSegments[i].EvaluatePosition(t));
+                    float heightMultiplier = 0.5f * Mathf.Sin(((2f * t) - 0.5f) * Mathf.PI) + 0.5f;
+                    float currentHeight = maxHeight * heightMultiplier;
+
+                    Debug.Log($"Height: {currentHeight} height multiplier {heightMultiplier} t {t}");
+                    if (leftSegments[i].GetLength() < rightSegments[i].GetLength())
+                    {
+                        rightHeightOffset = currentHeight * Vector3.up;
+                        leftHeightOffset = Vector3.zero;
+                    }
+                    else
+                    {
+                        rightHeightOffset = Vector3.zero;
+                        leftHeightOffset = currentHeight * Vector3.up;
+                    }
+                    if (i % 2 != 0)
+                    {
+                        rightHeightOffset = Vector3.zero;
+                        leftHeightOffset = Vector3.zero;
+                    }
+                    
+                    leftPointsList.Add(leftSegments[i].EvaluatePosition(t) + heightOffset + leftHeightOffset);
+                    centerPointsList.Add(centerSegments[i].EvaluatePosition(t) + heightOffset);
+                    rightPointsList.Add(rightSegments[i].EvaluatePosition(t) + heightOffset + rightHeightOffset);
                 }
             }
             leftPointsList.Add(leftPointsList[0]);

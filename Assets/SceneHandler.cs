@@ -19,6 +19,9 @@ namespace Assets.TrackGeneration
         public Material startLineMaterial;
         public Material gridMarkerMaterial;
 
+        [Header("Floor Settings")]
+        public GameObject floorPrefab;
+
         [Header("Track Parameters")]
         public float trackWidth = 12f;
         public float trackHeight = 0.1f;
@@ -48,6 +51,7 @@ namespace Assets.TrackGeneration
         private IEnumerator InitializeScene()
         {
             SetupTrackSystem();
+            SetUpFloor();
             SetUpCarSpawner();
             SetUpRaceHandler();
 
@@ -95,6 +99,14 @@ namespace Assets.TrackGeneration
             trackHandler.trackCamera = trackCamera;
 
             //Debug.Log("Track system setup complete!");
+        }
+
+        private void SetUpFloor()
+        {
+            GameObject floorSystem = new GameObject("Floor System");
+            FloorGenerator floorGenerator = floorSystem.AddComponent<FloorGenerator>();
+            floorGenerator.floorPrefab = floorPrefab;
+            floorGenerator.Initialize();
         }
 
         private void SetUpCarSpawner()

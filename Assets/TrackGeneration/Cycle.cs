@@ -245,7 +245,7 @@ namespace Assets.TrackGeneration
         }
 
 
-        public SplineContainer CreateSmoothedSpline(GameObject targetObject, List<float> heights = null, float distance = 0.6f, float length = 0.8f)
+        public SplineContainer CreateSmoothedSpline(GameObject targetObject, float[] heights = null, float distance = 0.6f, float length = 0.8f)
         {
             
             
@@ -255,12 +255,15 @@ namespace Assets.TrackGeneration
                 splineContainer = targetObject.AddComponent<SplineContainer>();
             }
 
-            //heights = GeneratePerlinHeights(Points.Count * 2);
 
             // If no heights provided, default to zero
             if (heights == null)
             {
-                heights = new List<float>(new float[Points.Count * 2]); // *2 because we create 2 knots per point
+                heights = new float[Points.Count];
+                for (int i = 0; i < Points.Count; i++)
+                {
+                    heights[i] = 0f;
+                }
             }
 
             Spline spline = new Spline();
@@ -282,23 +285,24 @@ namespace Assets.TrackGeneration
                 Vector2 outTangentB = -inTangentB;
 
                 // Get heights for current knots (2 knots per point)
-                float heightA = heights[i * 2];
-                float heightB = heights[i * 2 + 1];
+                float height = heights[i];
+                float nextHeight = heights[(i + 1) % Points.Count];
+
 
                 // Create knots with varying heights
                 BezierKnot knotA = new BezierKnot
                 (
-                    new float3(knotPointA.x, heightA, knotPointA.y),
-                    new float3(inTangentA.x * 0.1f, heightA, inTangentA.y * 0.1f),
+                    new float3(knotPointA.x, height, knotPointA.y),
+                    new float3(inTangentA.x * 0.1f, 0f, inTangentA.y * 0.1f),
                     //new float3(Vector3.zero.x, heightA, Vector3.zero.z),
-                    new float3(outTangentA.x, heightA, outTangentA.y)
+                    new float3(outTangentA.x, 0f, outTangentA.y)
                 );
 
                 BezierKnot knotB = new BezierKnot
                 (
-                    new float3(knotPointB.x, heightB, knotPointB.y),
-                    new float3(inTangentB.x, heightB, inTangentB.y),
-                    new float3(outTangentB.x * 0.1f, heightB, outTangentB.y * 0.1f)
+                    new float3(knotPointB.x, nextHeight, knotPointB.y),
+                    new float3(inTangentB.x, 0f, inTangentB.y),
+                    new float3(outTangentB.x * 0.1f, 0f, outTangentB.y * 0.1f)
                     //new float3(Vector3.zero.x, heightA, Vector3.zero.z)
                 );
 
@@ -311,23 +315,6 @@ namespace Assets.TrackGeneration
             return splineContainer;
         }
 
-        public List<float> GeneratePerlinHeights(int numKnots, float minHeight = 0f, float maxHeight = 1f, float noiseScale = 0.3f)
-        {
-            List<float> heights = new List<float>();
-
-            for (int i = 0; i < numKnots; i++)
-            {
-                // Use Perlin noise for smooth random variation
-                float t = i * noiseScale;
-                float noise = Mathf.PerlinNoise(t, 0f);
-
-                // Scale to desired height range
-                float height = Mathf.Lerp(minHeight, maxHeight, noise);
-                heights.Add(height);
-            }
-
-            return heights;
-        }
 
         public Vector2 GetKnotPoints(Vector2 a, Vector2 b, float distance)
         {

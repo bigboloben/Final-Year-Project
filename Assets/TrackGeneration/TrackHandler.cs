@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine.Splines;
 using UnityEngine.InputSystem;
+using Unity.Mathematics;
 
 
 namespace Assets.TrackGeneration
@@ -65,6 +66,7 @@ namespace Assets.TrackGeneration
         private TrackMesh trackMeshGenerator;
         private TrackParameters trackParameters;
 
+        private float[] heights;
 
 
         void Awake()
@@ -161,7 +163,12 @@ namespace Assets.TrackGeneration
             graph = new Graph();
             cycles = new List<Cycle>();
 
+
             GeneratePoints(generation);
+
+            heights = GenerateSmoothArray(points.Count);
+            //heights = null;
+
             delaunayTriangulation = new DelaunayTriangulation(points);
             graph = delaunayTriangulation.Compute();
             graph.RemoveOutOfBounds(CanvasSize);
@@ -181,13 +188,15 @@ namespace Assets.TrackGeneration
             splineObject.SetActive(false);
             rightSplineObject.SetActive(false);
             leftSplineObject.SetActive(false);
-            trackSpline = cycle.CreateSmoothedSpline(splineObject);
+            trackSpline = cycle.CreateSmoothedSpline(splineObject, heights: heights);
             (Cycle, Cycle) offsetCycles = cycle.GetOffsetCycles(trackWidth/2);
-            rightSpline = offsetCycles.Item1.CreateSmoothedSpline(rightSplineObject);
-            leftSpline = offsetCycles.Item2.CreateSmoothedSpline(leftSplineObject);
-            //CenterSpline();
+            rightSpline = offsetCycles.Item1.CreateSmoothedSpline(rightSplineObject, heights: heights);
+            leftSpline = offsetCycles.Item2.CreateSmoothedSpline(leftSplineObject, heights: heights);
+
+            CenterSplines();
 
             CreateTrackMeshFromSplines();
+            
             GenerateCheckpoints();
             
         }
@@ -208,24 +217,20 @@ namespace Assets.TrackGeneration
                 Debug.LogError("Track material is not assigned!");
                 return;
             }
+
+            
+
             trackParameters = new TrackParameters(trackWidth, wallHeight, wallWidth, segments, banking);
             trackMeshGenerator = new TrackMesh(trackParameters);
 
-            //trackGenerator = new SplineTrackMeshGenerator(
-            //    trackWidth,
-            //    wallHeight, // track wall height
-            //    wallWidth, // track wall width
-            //    segments,    // segments per unit
-            //    banking    // banking angle in degrees
-            //);
             List<SplineContainer> splines = new List<SplineContainer>();
             splines.Add(leftSpline);
             splines.Add(trackSpline);
             splines.Add(rightSpline);
             GameObject generatedMesh = trackMeshGenerator.GenerateTrackMesh(
-                                                                        splines, trackMaterial, wallMaterial, wallPhysicsMaterial, startLineMaterial, gridMarkerMaterial,
-                                                                        out Vector3 startPos1, out Vector3 startPos2, out Quaternion startRot
-                                                                        );
+                splines, trackMaterial, wallMaterial, wallPhysicsMaterial, startLineMaterial, gridMarkerMaterial,
+                out Vector3 startPos1, out Vector3 startPos2, out Quaternion startRot
+            );
             startPosition1 = startPos1;
             startPosition2 = startPos2;
             startRotation = startRot;
@@ -242,16 +247,6 @@ namespace Assets.TrackGeneration
             points = gen.GeneratePoints(PointCount, generationStrategy);
         }
 
-        private void CenterSpline()
-        {
-            Vector3 center = GetTrackCenter();
-            
-
-            // Move the spline container
-            splineObject.transform.position -= center;
-            rightSplineObject.transform.position -= center;
-            leftSplineObject.transform.position -= center;
-        }
 
         public (Vector3 position1, Vector3 position2, Quaternion rotation) GetTrackStartTransform()
         {
@@ -312,10 +307,10 @@ namespace Assets.TrackGeneration
             if (trackCamera != null && trackSpline != null)
             {
                 // Get the center of the spline
-                Vector3 trackCenter = GetTrackCenter();
+               ;
 
                 // Set the camera position above the center of the track
-                Vector3 cameraPosition = trackCenter + Vector3.up * cameraHeight;
+                Vector3 cameraPosition = Vector3.zero + Vector3.up * cameraHeight;
                 trackCamera.transform.position = cameraPosition;
 
                 // Make the camera look down at the track
@@ -323,25 +318,42 @@ namespace Assets.TrackGeneration
             }
         }
 
-        Vector3 GetTrackCenter()
+        private void CenterSplines()
         {
-            // Find bounds of the spline to get the center
-            if (trackSpline == null || trackSpline.Spline == null)
-                return Vector3.zero;
-
+            // Calculate center offset from spline points
             Vector3 min = Vector3.positiveInfinity;
             Vector3 max = Vector3.negativeInfinity;
-            float step = 0.01f;  // Sample every 1% of the spline
 
-            for (float t = 0; t <= 1f; t += step)
+            // Get actual spline knot positions
+            for (int i = 0; i < trackSpline.Spline.Count; i++)
             {
-                Vector3 point = trackSpline.EvaluatePosition(t);
-                min = Vector3.Min(min, point);
-                max = Vector3.Max(max, point);
+                BezierKnot knot = trackSpline.Spline[i];
+                min = Vector3.Min(min, knot.Position);
+                max = Vector3.Max(max, knot.Position);
             }
 
-            // Calculate center of the bounds
-            return (max + min) / 2f;
+            // Create offset that only affects X and Z
+            float3 offset = new float3(
+                -(max.x + min.x) / 2f,  // Center X
+                0,                      // Don't center Y
+                -(max.z + min.z) / 2f   // Center Z
+            );
+
+            // Apply offset to all knots in all splines
+            for (int i = 0; i < trackSpline.Spline.Count; i++)
+            {
+                var knot = trackSpline.Spline[i];
+                knot.Position += offset;
+                trackSpline.Spline[i] = knot;
+
+                knot = rightSpline.Spline[i];
+                knot.Position += offset;
+                rightSpline.Spline[i] = knot;
+
+                knot = leftSpline.Spline[i];
+                knot.Position += offset;
+                leftSpline.Spline[i] = knot;
+            }
         }
 
         private void GenerateCheckpoints()
@@ -373,7 +385,27 @@ namespace Assets.TrackGeneration
         {
             return checkpoints;
         }
+        public float[] GenerateSmoothArray(int length, float minHeight = 0f, float maxHeight = 10f)
+        {
+            float[] array = new float[length];
+            float scale = 0.3f; // Increased scale for more frequent changes
+            float offset = UnityEngine.Random.Range(0f, 1000f);
 
+            for (int i = 0; i < length; i++)
+            {
+                // Using multiple frequencies of noise to add more detail
+                float noise1 = Mathf.PerlinNoise(i * scale + offset, 0.5f);
+                float noise2 = Mathf.PerlinNoise(i * scale * 2 + offset, 1.5f) * 0.5f; // Higher frequency, lower amplitude
+
+                // Combine the noise values with more weight on the primary frequency
+                float noiseValue = (noise1 + noise2);
+
+                // Map to desired range
+                array[i] = Mathf.Lerp(minHeight, maxHeight, noiseValue);
+            }
+
+            return array;
+        }
 
     }
 }
