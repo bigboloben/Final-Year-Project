@@ -19,18 +19,62 @@ namespace Assets.TrackGeneration
             Spline centerSpline = splines[1].Spline;
             Spline rightSpline = splines[2].Spline;
 
-            int numberOfPoints = Mathf.Max(32, (int)(centerSpline.GetLength() * parameters.SegmentsPerUnit));
-            Vector3 heightOffset = Vector3.up * TrackParameters.TRACK_HEIGHT_OFFSET;
+            List<Spline> leftSegments = GetSplineSegments(leftSpline);
+            List<Spline> centerSegments = GetSplineSegments(centerSpline);
+            List<Spline> rightSegments = GetSplineSegments(rightSpline);
 
-            SplineArcLengthTable leftTable = new SplineArcLengthTable(leftSpline);
-            SplineArcLengthTable centerTable = new SplineArcLengthTable(centerSpline);
-            SplineArcLengthTable rightTable = new SplineArcLengthTable(rightSpline);
+            List<Vector3> leftPointsList = new List<Vector3>();
+            List<Vector3> centerPointsList = new List<Vector3>();
+            List<Vector3> rightPointsList = new List<Vector3>();
 
-            Vector3[] leftPoints = GenerateSplinePoints(leftSpline, leftTable, numberOfPoints, heightOffset);
-            Vector3[] centerPoints = GenerateSplinePoints(centerSpline, centerTable, numberOfPoints, heightOffset);
-            Vector3[] rightPoints = GenerateSplinePoints(rightSpline, rightTable, numberOfPoints, heightOffset);
+            for (int i = 0; i < centerSegments.Count; i++)
+            {
+                int numberOfPoints = Mathf.Max(32, (int)(centerSegments[i].GetLength() * parameters.SegmentsPerUnit));
+                for (int j = 0; j < numberOfPoints - 1; j++)
+                {
+                    float t = j / (float)(numberOfPoints - 1);
+                    leftPointsList.Add(leftSegments[i].EvaluatePosition(t));
+                    centerPointsList.Add(centerSegments[i].EvaluatePosition(t));
+                    rightPointsList.Add(rightSegments[i].EvaluatePosition(t));
+                }
+            }
+            leftPointsList.Add(leftPointsList[0]);
+            centerPointsList.Add(centerPointsList[0]);
+            rightPointsList.Add(rightPointsList[0]);
+
+
+
+            Vector3[] leftPoints = leftPointsList.ToArray();
+            Vector3[] centerPoints = centerPointsList.ToArray();
+            Vector3[] rightPoints = rightPointsList.ToArray();
+
+            //int numberOfPoints = Mathf.Max(32, (int)(centerSpline.GetLength() * parameters.SegmentsPerUnit));
+            //Vector3 heightOffset = Vector3.up * TrackParameters.TRACK_HEIGHT_OFFSET;
+
+            //SplineArcLengthTable leftTable = new SplineArcLengthTable(leftSpline);
+            //SplineArcLengthTable centerTable = new SplineArcLengthTable(centerSpline);
+            //SplineArcLengthTable rightTable = new SplineArcLengthTable(rightSpline);
+
+            //Vector3[] leftPoints = GenerateSplinePoints(leftSpline, leftTable, numberOfPoints, heightOffset);
+            //Vector3[] centerPoints = GenerateSplinePoints(centerSpline, centerTable, numberOfPoints, heightOffset);
+            //Vector3[] rightPoints = GenerateSplinePoints(rightSpline, rightTable, numberOfPoints, heightOffset);
 
             return new List<Vector3[]> { leftPoints, centerPoints, rightPoints };
+        }
+
+        public List<Spline> GetSplineSegments(Spline spline)
+        {
+            List<Spline> segments = new List<Spline>();
+            for (int i = 0; i < spline.Count; i ++)
+            {
+                int nextIndex = (i + 1) % spline.Count;
+                Spline toAdd = new Spline();
+                toAdd.Clear();
+                toAdd.Add(spline[i]);
+                toAdd.Add(spline[nextIndex]);
+                segments.Add(toAdd);
+            }
+            return segments;
         }
 
         private Vector3[] GenerateSplinePoints(

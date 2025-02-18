@@ -11,6 +11,7 @@ namespace Assets.TrackGeneration
         private readonly SplineProcessor splineProcessor;
         private readonly StartLineGenerator startLineGenerator;
         private readonly WallGenerator wallGenerator;
+        public List<Vector3[]> splinePoints;
 
         public TrackMesh(TrackParameters parameters)
         {
@@ -34,7 +35,7 @@ namespace Assets.TrackGeneration
         {
             GameObject trackObject = new GameObject("Track");
 
-            List<Vector3[]> splinePoints = splineProcessor.GeneratePointsFromSplines(splines);
+            splinePoints = splineProcessor.GeneratePointsFromSplines(splines);
 
             GameObject trackSurface = meshBuilder.GenerateTrackSurface(splinePoints, trackMaterial);
             //List<Checkpoint> checkpoints = CheckpointGenerator.GenerateCheckpoints(splinePoints[1], trackObject);

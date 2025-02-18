@@ -44,7 +44,7 @@ namespace Assets.TrackGeneration
             //List<Vector3[]> splinePoints = GenerateOffsetSplinesFromSplines(spline);
             List<Vector3[]> splinePoints = GeneratePointsFromSplines(splines); 
             GameObject trackSurface = GenerateTrackSurface(splinePoints, trackMaterial);
-            List<Checkpoint> checkpoints = CheckpointGenerator.GenerateCheckpoints(splinePoints[1], trackObject);
+            //List<Checkpoint> checkpoints = CheckpointGenerator.GenerateCheckpoints(splinePoints[1], trackObject);
             StartLineInfo startLineInfo = CreateStartFinishLine(splinePoints[1], startLineMaterial);
             GameObject leftWall = GenerateWall(splinePoints[0], wallMaterial, wallPhysicsMaterial);
             GameObject rightWall = GenerateWall(splinePoints[2], wallMaterial, wallPhysicsMaterial);

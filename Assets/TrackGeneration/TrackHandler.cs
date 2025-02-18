@@ -360,11 +360,9 @@ namespace Assets.TrackGeneration
 
             // Generate checkpoints using the sampled points
             checkpoints = CheckpointGenerator.GenerateCheckpoints(
-                centerPoints.ToArray(),
-                trackMesh,
-                checkpointSpacing,
-                checkpointWidth,
-                checkpointHeight
+                leftPoints: trackMeshGenerator.splinePoints[0],
+                rightPoints: trackMeshGenerator.splinePoints[2],
+                trackObject: trackMesh
             );
 
 
