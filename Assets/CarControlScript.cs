@@ -540,15 +540,20 @@ public class CarControlScript : MonoBehaviour
         carBodyTransform.eulerAngles = new Vector3(0, currentRotation.y, 0);
     }
 
-    void ResetPosition()
+    private void ResetPosition()
     {
         if (trackHandler != null)
         {
             var (startPos1, startPos2, startRot) = trackHandler.GetTrackStartTransform();
             transform.position = startPos1;
             transform.rotation = startRot;
+
+            // Ensure the rigidbody is properly reset
+            sphereRb.linearVelocity = Vector3.zero;         // Stop all linear movement
+            sphereRb.angularVelocity = Vector3.zero;  // Stop all rotational movement
         }
     }
+
 
     public float GetCurrentSpeed()
     {

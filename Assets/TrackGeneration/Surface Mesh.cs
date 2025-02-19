@@ -21,6 +21,7 @@ namespace Assets.TrackGeneration
             MeshFilter meshFilter = surfaceObject.AddComponent<MeshFilter>();
             MeshRenderer meshRenderer = surfaceObject.AddComponent<MeshRenderer>();
             meshRenderer.material = material;
+            meshRenderer.renderingLayerMask = (1 << 0) | (1 << 8);
 
             Mesh mesh = CreateTrackMesh(splinePoints);
             meshFilter.mesh = mesh;

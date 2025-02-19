@@ -16,15 +16,21 @@ namespace Assets.TrackGeneration
         public Material trackMaterial;
         public Material wallMaterial;
         public PhysicsMaterial wallPhysicsMaterial;
-        public Material startLineMaterial;
-        public Material gridMarkerMaterial;
+        public GameObject startLinePrefab;
+        public GameObject gridMarkerPrefab;
+        public Material trackSupportMaterial;
 
         [Header("Floor Settings")]
         public GameObject floorPrefab;
 
         [Header("Track Parameters")]
-        public float trackWidth = 12f;
+        public float trackWidth = 100f;
         public float trackHeight = 0.1f;
+        public float wallHeight = 0.5f;
+        public float wallWidth = 0.25f;
+        public int segments = 2;
+        public float banking = 15f;
+        public int supportCount = 20;
         public int pointCount = 150;
         public int canvasSize = 1000;
 
@@ -78,12 +84,18 @@ namespace Assets.TrackGeneration
             trackHandler.trackMaterial = trackMaterial;
             trackHandler.wallMaterial = wallMaterial;
             trackHandler.wallPhysicsMaterial = wallPhysicsMaterial;
-            trackHandler.startLineMaterial = startLineMaterial;
-            trackHandler.gridMarkerMaterial = gridMarkerMaterial;
+            trackHandler.startLinePrefab = startLinePrefab;
+            trackHandler.gridMarkerPrefab = gridMarkerPrefab;
+            trackHandler.trackSupportMaterial = trackSupportMaterial;
 
             // Set up track parameters
             trackHandler.trackWidth = trackWidth;
             trackHandler.trackHeight = trackHeight;
+            trackHandler.wallHeight = wallHeight;
+            trackHandler.wallWidth = wallWidth;
+            trackHandler.segments = segments;
+            trackHandler.banking = banking;
+            trackHandler.supportCount = supportCount;
             trackHandler.PointCount = pointCount;
             trackHandler.CanvasSize = canvasSize;
 

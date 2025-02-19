@@ -36,15 +36,17 @@ namespace Assets.TrackGeneration
         [Header("Track Settings")]
         public float trackWidth = 100f;
         public float trackHeight = 0.1f;
-        private float wallHeight = 0.5f;
-        private float wallWidth = 0.25f;
-        private int segments = 2;
-        private float banking = 15f;
+        public float wallHeight = 0.5f;
+        public float wallWidth = 0.25f;
+        public int segments = 2;
+        public float banking = 15f;
+        public int supportCount = 20;
         public Material trackMaterial;
         public Material wallMaterial;
         public PhysicsMaterial wallPhysicsMaterial;
-        public Material startLineMaterial;
-        public Material gridMarkerMaterial ;
+        public GameObject startLinePrefab;
+        public GameObject gridMarkerPrefab;
+        public Material trackSupportMaterial;
         public bool showDebugLines = false;
 
         [Header("Checkpoint Settings")]
@@ -165,6 +167,7 @@ namespace Assets.TrackGeneration
 
 
             GeneratePoints(generation);
+ 
 
             heights = GenerateSmoothArray(points.Count);
             //heights = null;
@@ -220,7 +223,7 @@ namespace Assets.TrackGeneration
 
             
 
-            trackParameters = new TrackParameters(trackWidth, wallHeight, wallWidth, segments, banking);
+            trackParameters = new TrackParameters(trackWidth, wallHeight, wallWidth, segments, banking, supportCount);
             trackMeshGenerator = new TrackMesh(trackParameters);
 
             List<SplineContainer> splines = new List<SplineContainer>();
@@ -228,7 +231,7 @@ namespace Assets.TrackGeneration
             splines.Add(trackSpline);
             splines.Add(rightSpline);
             GameObject generatedMesh = trackMeshGenerator.GenerateTrackMesh(
-                splines, trackMaterial, wallMaterial, wallPhysicsMaterial, startLineMaterial, gridMarkerMaterial,
+                splines, trackMaterial, wallMaterial, wallPhysicsMaterial, startLinePrefab, gridMarkerPrefab, trackSupportMaterial,
                 out Vector3 startPos1, out Vector3 startPos2, out Quaternion startRot
             );
             startPosition1 = startPos1;

@@ -50,7 +50,7 @@ namespace Assets.TrackGeneration
                     float heightMultiplier = 0.5f * Mathf.Sin(((2f * t) - 0.5f) * Mathf.PI) + 0.5f;
                     float currentHeight = maxHeight * heightMultiplier;
 
-                    Debug.Log($"Height: {currentHeight} height multiplier {heightMultiplier} t {t}");
+                    //Debug.Log($"Height: {currentHeight} height multiplier {heightMultiplier} t {t}");
                     if (leftSegments[i].GetLength() < rightSegments[i].GetLength())
                     {
                         rightHeightOffset = currentHeight * Vector3.up;
@@ -110,6 +110,7 @@ namespace Assets.TrackGeneration
             }
             return segments;
         }
+
 
         private Vector3[] GenerateSplinePoints(
             Spline spline,

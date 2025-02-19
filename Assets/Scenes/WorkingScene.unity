@@ -557,11 +557,17 @@ MonoBehaviour:
   trackMaterial: {fileID: 2100000, guid: 4ecf83cc722c37f409a0e37fe17d6927, type: 2}
   wallMaterial: {fileID: 2100000, guid: 05375587f5867084eb5ceeee2f8aadca, type: 2}
   wallPhysicsMaterial: {fileID: 13400000, guid: df92b4f6d60627c41b61699cb0cf808a, type: 2}
-  startLineMaterial: {fileID: 2100000, guid: b87ea42a229feb6439e1a4d32d9d3a48, type: 2}
-  gridMarkerMaterial: {fileID: 2100000, guid: 3209aea0a520acd49af5f6418f82bcfa, type: 2}
+  startLinePrefab: {fileID: 8445133854396499727, guid: 3597e49d165da4c45b155a92f242c99b, type: 3}
+  gridMarkerPrefab: {fileID: 8676230003090097784, guid: d23f67310840354459af2b5a4edb3e7d, type: 3}
+  trackSupportMaterial: {fileID: 2100000, guid: 4ecf83cc722c37f409a0e37fe17d6927, type: 2}
   floorPrefab: {fileID: 3952005589084498169, guid: 665e9ebf19610ba4b8db60ffbf6cf581, type: 3}
   trackWidth: 12
   trackHeight: 0.1
+  wallHeight: 0.5
+  wallWidth: 0.25
+  segments: 2
+  banking: 15
+  supportCount: 20
   pointCount: 150
   canvasSize: 1000
   cameraHeight: 80

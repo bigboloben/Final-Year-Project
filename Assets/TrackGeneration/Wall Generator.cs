@@ -45,16 +45,16 @@ namespace Assets.TrackGeneration
                 Vector3 nextRight = GetRightDirection(edgePoints, i + 1);
 
                 // Current segment vertices
-                Vector3 bottomRightCurrent = edgePoints[i] + right * parameters.WallDepth;
+                Vector3 bottomRightCurrent = edgePoints[i] + right * parameters.WallDepth - Vector3.up * parameters.WallHeight;
                 Vector3 topRightCurrent = edgePoints[i] + right * parameters.WallDepth + Vector3.up * parameters.WallHeight;
                 Vector3 topLeftCurrent = edgePoints[i] + right * -parameters.WallDepth + Vector3.up * parameters.WallHeight;
-                Vector3 bottomLeftCurrent = edgePoints[i] + right * -parameters.WallDepth;
+                Vector3 bottomLeftCurrent = edgePoints[i] + right * -parameters.WallDepth - Vector3.up * parameters.WallHeight;
 
                 // Next segment vertices
-                Vector3 bottomRightNext = edgePoints[i + 1] + nextRight * parameters.WallDepth;
+                Vector3 bottomRightNext = edgePoints[i + 1] + nextRight * parameters.WallDepth - Vector3.up * parameters.WallHeight;
                 Vector3 topRightNext = edgePoints[i + 1] + nextRight * parameters.WallDepth + Vector3.up * parameters.WallHeight;
                 Vector3 topLeftNext = edgePoints[i + 1] + nextRight * -parameters.WallDepth + Vector3.up * parameters.WallHeight;
-                Vector3 bottomLeftNext = edgePoints[i + 1] + nextRight * -parameters.WallDepth;
+                Vector3 bottomLeftNext = edgePoints[i + 1] + nextRight * -parameters.WallDepth - Vector3.up * parameters.WallHeight;
 
                 currentDistance += Vector3.Distance(edgePoints[i], edgePoints[i + 1]);
                 float uCurrent = currentDistance / totalLength;
@@ -79,7 +79,7 @@ namespace Assets.TrackGeneration
 
                 // Bottom face
                 AddQuad(vertices, uvs, normals, triangles, baseIndex + 12,
-                    bottomRightCurrent, bottomLeftCurrent, bottomRightNext, bottomLeftNext,
+                    bottomLeftCurrent, bottomRightCurrent, bottomLeftNext, bottomRightNext,
                     uPrev, uCurrent, -Vector3.up);
             }
 
