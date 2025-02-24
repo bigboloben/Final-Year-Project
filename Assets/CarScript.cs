@@ -27,7 +27,7 @@ public class CarScript : MonoBehaviour
 
     private float accelerationInput;
     private float steeringInput;
-    private float brakeInput;
+    //private float brakeInput;
     private bool handbrake;
 
     [Header("Suspension Settings")]
@@ -149,7 +149,7 @@ public class CarScript : MonoBehaviour
         Driving();
         Debug.Log("steering" + steeringInput);
         Steering();
-        Braking();
+        //Braking();
         HandleDrift();
         //StabilityControl();
         if (setValues) SetSuspensionAndFriction();
@@ -201,15 +201,15 @@ public class CarScript : MonoBehaviour
     }
 
 
-    void Braking()
-    {
-        // Apply brake torque to all wheel colliders
-        float brakeTorque = 2000f; // Adjust this value based on your needs
-        for (int i = 0; i < wheelColliders.Length; i++)
-        {
-            wheelColliders[i].brakeTorque = brakeTorque * brakeInput; // Apply brake torque
-        }
-    }
+    //void Braking()
+    //{
+    //    // Apply brake torque to all wheel colliders
+    //    float brakeTorque = 2000f; // Adjust this value based on your needs
+    //    for (int i = 0; i < wheelColliders.Length; i++)
+    //    {
+    //        wheelColliders[i].brakeTorque = brakeTorque * brakeInput; // Apply brake torque
+    //    }
+    //}
 
     void Steering()
     {

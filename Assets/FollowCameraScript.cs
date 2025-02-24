@@ -13,6 +13,8 @@ public class FollowCameraScript : MonoBehaviour
     private CarControls controls;
     private float horizontalRotationInput = 0f; // Input for horizontal rotation
 
+    public bool rearView;
+
     void Awake()
     {
         controls = new CarControls();
@@ -44,15 +46,31 @@ public class FollowCameraScript : MonoBehaviour
     {
         if (carTransform == null) return;
 
-        // Target position for the camera to follow the car
-        Vector3 targetPosition = carTransform.position + carTransform.TransformVector(offset);
+        if (!rearView)
+        {
 
-        // Smoothly move the camera to the target position
-        
-        transform.position = Vector3.Lerp(transform.position, targetPosition, followSpeed * Time.deltaTime);
-        
-        // Rotate the camera based on right/left input
-        RotateCamera();
+            // Fixed position relative to car
+            transform.position = carTransform.TransformPoint(offset);
+
+            // Look at a point behind the car
+            transform.LookAt(carTransform.position);
+
+            // Keep the camera level (no roll)
+            Vector3 eulerAngles = transform.rotation.eulerAngles;
+            transform.rotation = Quaternion.Euler(eulerAngles.x, eulerAngles.y, 0);
+        }
+        else
+        {
+            // Target position for the camera to follow the car
+            Vector3 targetPosition = carTransform.position + carTransform.TransformVector(offset);
+
+            // Smoothly move the camera to the target position
+
+            transform.position = Vector3.Lerp(transform.position, targetPosition, followSpeed * Time.deltaTime);
+
+            // Rotate the camera based on right/left input
+            RotateCamera();
+        }
     }
 
     void RotateCamera()

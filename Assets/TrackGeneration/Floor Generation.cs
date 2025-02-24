@@ -18,7 +18,7 @@ namespace Assets.TrackGeneration
 
         [Header("Floor Settings")]
         public GameObject floorPrefab;
-        public int gridSize = 4;
+        public int gridSize = 6;
         public float tileSize = 200f;
 
         [Header("Height Map Settings")]
@@ -42,6 +42,7 @@ namespace Assets.TrackGeneration
         {
             GenerateFloor();
             //ApplyHeightMap();
+            SetContinuousUVs();
 
 #if UNITY_EDITOR
             StoreCurrentValues();
@@ -72,7 +73,7 @@ namespace Assets.TrackGeneration
                     prev_horizontalScale != horizontalScale ||
                     prev_noiseOffset != noiseOffset)
                 {
-                    ApplyHeightMap();
+                    //ApplyHeightMap();
                     StoreCurrentValues();
                 }
             }
@@ -107,6 +108,7 @@ namespace Assets.TrackGeneration
 
                     GameObject tile = Instantiate(floorPrefab, position, Quaternion.identity, floorParent.transform);
                     tile.name = $"Floor_Tile_{x}_{z}";
+                    tile.tag = "Floor";
 
                     MeshFilter meshFilter = tile.GetComponent<MeshFilter>();
                     if (meshFilter != null)
@@ -114,81 +116,121 @@ namespace Assets.TrackGeneration
                         meshFilter.mesh = Instantiate(meshFilter.sharedMesh);
                         floorTiles.Add(meshFilter);
                     }
+                    tile.AddComponent<MeshCollider>();
                 }
             }
         }
-
-        private void ApplyHeightMap()
+        private void SetContinuousUVs()
         {
+            // Calculate the exact bounds of the grid
+            float halfExtent = gridSize * tileSize * 0.5f;
+            Vector3 topLeftCorner = new Vector3(-halfExtent, 0, -halfExtent);
+            float gridWidth = halfExtent * 2f;
+            float gridDepth = halfExtent * 2f;
+
             foreach (MeshFilter meshFilter in floorTiles)
             {
-                Mesh mesh = meshFilter.mesh;
+                Mesh mesh = meshFilter.sharedMesh;
+                if (mesh == null) continue;
+
                 Vector3[] vertices = mesh.vertices;
+                Vector2[] uvs = new Vector2[vertices.Length];
+
+                // Cache transform data for performance
+                Transform transform = meshFilter.transform;
+                Vector3 position = transform.position;
+                Vector3 scale = transform.lossyScale;
 
                 for (int i = 0; i < vertices.Length; i++)
                 {
-                    Vector3 worldPos = meshFilter.transform.TransformPoint(vertices[i]);
-                    float height = GetHeightAtPosition(worldPos);
-                    vertices[i] = meshFilter.transform.InverseTransformPoint(
-                        new Vector3(worldPos.x, height, worldPos.z)
-                    );
+                    // Convert local vertex position to world position with scale applied
+                    Vector3 scaledVertex = Vector3.Scale(vertices[i], scale);
+                    Vector3 worldPos = position + transform.rotation * scaledVertex;
+
+                    // Calculate UVs
+                    float u = (worldPos.x - topLeftCorner.x) / gridWidth;
+                    float v = (worldPos.z - topLeftCorner.z) / gridDepth;
+
+                    uvs[i] = new Vector2(u, v);
                 }
 
-                mesh.vertices = vertices;
-                mesh.RecalculateNormals();
-                mesh.RecalculateBounds();
-
-                MeshCollider meshCollider = meshFilter.GetComponent<MeshCollider>();
-                if (meshCollider != null)
-                {
-                    meshCollider.sharedMesh = mesh;
-                }
+                mesh.uv = uvs;
             }
         }
 
-        private float GetHeightAtPosition(Vector3 worldPos)
-        {
-            return FBM(worldPos) * heightScale + heightOffset;
-        }
 
-        private float FBM(Vector3 position)
-        {
-            float amplitude = 1f;
-            float frequency = baseFrequency;
-            float total = 0f;
-            float maxValue = 0f;  // Used for normalization
 
-            // Scale the position to control feature size
-            Vector3 scaledPos = new Vector3(
-                position.x / horizontalScale,
-                position.y,
-                position.z / horizontalScale
-            );
+        //    private void ApplyHeightMap()
+        //    {
+        //        foreach (MeshFilter meshFilter in floorTiles)
+        //        {
+        //            Mesh mesh = meshFilter.mesh;
+        //            Vector3[] vertices = mesh.vertices;
 
-            for (int i = 0; i < octaves; i++)
-            {
-                // Add noise at current frequency and amplitude
-                float noiseValue = Mathf.PerlinNoise(
-                    (scaledPos.x * frequency) + noiseOffset.x,
-                    (scaledPos.z * frequency) + noiseOffset.y
-                );
+        //            for (int i = 0; i < vertices.Length; i++)
+        //            {
+        //                Vector3 worldPos = meshFilter.transform.TransformPoint(vertices[i]);
+        //                float height = GetHeightAtPosition(worldPos);
+        //                vertices[i] = meshFilter.transform.InverseTransformPoint(
+        //                    new Vector3(worldPos.x, height, worldPos.z)
+        //                );
+        //            }
 
-                total += noiseValue * amplitude;
-                maxValue += amplitude;
+        //            mesh.vertices = vertices;
+        //            mesh.RecalculateNormals();
+        //            mesh.RecalculateBounds();
 
-                // Update frequency and amplitude for next octave
-                frequency *= lacunarity;
-                amplitude *= persistence;
-            }
+        //            MeshCollider meshCollider = meshFilter.GetComponent<MeshCollider>();
+        //            if (meshCollider != null)
+        //            {
+        //                meshCollider.sharedMesh = mesh;
+        //            }
+        //        }
+        //    }
 
-            // Normalize the result to keep it in the [0,1] range
-            return total / maxValue;
-        }
+        //    private float GetHeightAtPosition(Vector3 worldPos)
+        //    {
+        //        return FBM(worldPos) * heightScale + heightOffset;
+        //    }
 
-        // Optional: Method to update heights at runtime
-        public void UpdateHeights()
-        {
-            ApplyHeightMap();
-        }
+        //    private float FBM(Vector3 position)
+        //    {
+        //        float amplitude = 1f;
+        //        float frequency = baseFrequency;
+        //        float total = 0f;
+        //        float maxValue = 0f;  // Used for normalization
+
+        //        // Scale the position to control feature size
+        //        Vector3 scaledPos = new Vector3(
+        //            position.x / horizontalScale,
+        //            position.y,
+        //            position.z / horizontalScale
+        //        );
+
+        //        for (int i = 0; i < octaves; i++)
+        //        {
+        //            // Add noise at current frequency and amplitude
+        //            float noiseValue = Mathf.PerlinNoise(
+        //                (scaledPos.x * frequency) + noiseOffset.x,
+        //                (scaledPos.z * frequency) + noiseOffset.y
+        //            );
+
+        //            total += noiseValue * amplitude;
+        //            maxValue += amplitude;
+
+        //            // Update frequency and amplitude for next octave
+        //            frequency *= lacunarity;
+        //            amplitude *= persistence;
+        //        }
+
+        //        // Normalize the result to keep it in the [0,1] range
+        //        return total / maxValue;
+        //    }
+
+        //    // Optional: Method to update heights at runtime
+        //    public void UpdateHeights()
+        //    {
+        //        ApplyHeightMap();
+        //    }
     }
 }

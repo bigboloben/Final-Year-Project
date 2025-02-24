@@ -1,46 +1,65 @@
 using UnityEngine;
+using System;
 
 public class CameraControlScript : MonoBehaviour
-
 {
     private Camera[] cameras = new Camera[2];
     private CarControls controls;
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
+    private Action<UnityEngine.InputSystem.InputAction.CallbackContext> performedCallback;
+    private Action<UnityEngine.InputSystem.InputAction.CallbackContext> canceledCallback;
+
     void Awake()
     {
-
         controls = new CarControls();
 
-        //cameras[0] = transform.Find("PlayerCamera0").gameObject;
-        //cameras[1] = transform.Find("PlayerCamera1").gameObject;
+        // Create the callbacks once and store them as variables
+        performedCallback = ctx =>
+        {
+            if (cameras[0] != null && cameras[1] != null)
+            {
+                cameras[0].enabled = false;
+                cameras[1].enabled = true;
+            }
+        };
 
-        //controls.Camera.LookBehind.performed += ctx =>
-        //{
-        //    cameras[0].SetActive(false);
-        //    cameras[1].SetActive(true);
-        //};
-        //controls.Camera.LookBehind.canceled += ctx =>
-        //{
-        //    cameras[0].SetActive(true);
-        //    cameras[1].SetActive(false);
-        //};
+        canceledCallback = ctx =>
+        {
+            if (cameras[0] != null && cameras[1] != null)
+            {
+                cameras[0].enabled = true;
+                cameras[1].enabled = false;
+            }
+        };
     }
+
     public void SetupCameras(Camera camera0, Camera camera1)
     {
+        // Remove any previous callbacks if they exist
+        RemoveCallbacks();
+
         cameras[0] = camera0;
         cameras[1] = camera1;
 
-        controls.Camera.LookBehind.performed += ctx =>
+        // Only add callbacks if the cameras are valid
+        if (camera0 != null && camera1 != null)
         {
-            cameras[0].enabled = false;
-            cameras[1].enabled = true;
-        };
+            controls.Camera.LookBehind.performed += performedCallback;
+            controls.Camera.LookBehind.canceled += canceledCallback;
+        }
+    }
 
-        controls.Camera.LookBehind.canceled += ctx =>
+    private void RemoveCallbacks()
+    {
+        // Safely remove existing callbacks to prevent calling with destroyed cameras
+        if (performedCallback != null)
         {
-            cameras[0].enabled = true;
-            cameras[1].enabled = false;
-        };
+            controls.Camera.LookBehind.performed -= performedCallback;
+        }
+
+        if (canceledCallback != null)
+        {
+            controls.Camera.LookBehind.canceled -= canceledCallback;
+        }
     }
 
     private void OnEnable()
@@ -51,5 +70,15 @@ public class CameraControlScript : MonoBehaviour
     private void OnDisable()
     {
         controls.Disable();
+    }
+
+    private void OnDestroy()
+    {
+        // Make sure to remove all callbacks when the script is destroyed
+        RemoveCallbacks();
+
+        // Clear camera references
+        cameras[0] = null;
+        cameras[1] = null;
     }
 }

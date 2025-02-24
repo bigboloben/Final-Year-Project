@@ -15,18 +15,18 @@ namespace Assets.TrackGeneration {
             GameObject startLine = new GameObject("StartFinishLine");
 
             // Calculate starting positions and direction
-            Vector3 gridCenterPosition = centerPoints[centerPoints.Length - 20];
-            Vector3 gridCenterDirection = (centerPoints[centerPoints.Length - 19] - centerPoints[centerPoints.Length - 21]).normalized;
+            Vector3 gridCenterPosition = centerPoints[0];
+            Vector3 gridCenterDirection = (centerPoints[1] - centerPoints[centerPoints.Length - 1]).normalized;
             Vector3 gridCenterRight = Vector3.Cross(Vector3.up, gridCenterDirection).normalized;
 
             float carSpacing = parameters.TrackWidth * 0.25f;
 
-            Vector3 position1 = gridCenterPosition - gridCenterRight * carSpacing + Vector3.up * 0.001f;
-            Vector3 position2 = gridCenterPosition + gridCenterRight * carSpacing + Vector3.up * 0.001f;
+            Vector3 position1 = gridCenterPosition - gridCenterRight * carSpacing + Vector3.up * 0.1f - gridCenterDirection * 4f;
+            Vector3 position2 = gridCenterPosition + gridCenterRight * carSpacing + Vector3.up * 0.1f - gridCenterDirection * 4f;
 
             Quaternion startRotation = Quaternion.LookRotation(gridCenterDirection, Vector3.up);
 
-            GameObject line = CreateDecal(startLinePrefab, centerPoints[0], startRotation, "Start Line");
+            GameObject line = CreateDecal(startLinePrefab, centerPoints[0] + gridCenterDirection * 4f, startRotation, "Start Line");
             GameObject grid1 = CreateDecal(startGridPrefab, position1, startRotation, "Start Grid 1");
             GameObject grid2 = CreateDecal(startGridPrefab, position2, startRotation, "Start Grid 2");
 
@@ -45,7 +45,7 @@ namespace Assets.TrackGeneration {
 
             GameObject decal = Object.Instantiate(
                 prefab,
-                position + Vector3.up,
+                position + Vector3.up * 1.5f,
                 finalRotation
             );
             decal.name = name;

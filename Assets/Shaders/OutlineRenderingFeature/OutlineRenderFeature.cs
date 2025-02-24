@@ -40,7 +40,7 @@ namespace Assets.Shaders.OutlineRenderingFeature
         private const string k_NormalsTextureName = "_SceneViewSpaceNormals";
         [SerializeField] LayerMask layerMask;
 
-        public class TextureTransferData : ContextItem
+        private class TextureTransferData : ContextItem
         {
             public TextureHandle normalsTexture;
 
@@ -254,8 +254,8 @@ namespace Assets.Shaders.OutlineRenderingFeature
 
                 if (RenderGraphUtils.CanAddCopyPassMSAA())
                 {
-                    renderGraph.AddCopyPass(cameraTH, cameraTexture, passName: name);
-                    renderGraph.AddCopyPass(cameraTexture, cameraTH, passName: name);
+                    renderGraph.AddCopyPass(cameraTH, cameraTexture, passName: name + "1");
+                    renderGraph.AddCopyPass(cameraTexture, cameraTH, passName: name + "2");
 
 
 

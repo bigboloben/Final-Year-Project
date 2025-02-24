@@ -1,6 +1,7 @@
 using Assets.TrackGeneration;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace Assets.TrackGeneration
 {
@@ -45,7 +46,8 @@ namespace Assets.TrackGeneration
             mesh.vertices = vertices;
             mesh.triangles = triangles;
             mesh.uv = uvs;
-            mesh.RecalculateNormals();
+            var normals = CalculateSmoothNormals(vertices, triangles);
+            mesh.normals = normals;
             mesh.RecalculateBounds();
 
             return mesh;
@@ -80,6 +82,70 @@ namespace Assets.TrackGeneration
                 triangles[triIndex++] = nextBaseIndex + 1;
                 triangles[triIndex++] = nextBaseIndex;
             }
+        }
+
+        private Vector3[] CalculateSmoothNormals(Vector3[] vertices, int[] triangles)
+        {
+            Vector3[] normals = new Vector3[vertices.Length];
+            Dictionary<Vector3, List<int>> vertexGroups = new Dictionary<Vector3, List<int>>();
+
+            // Group vertices by position using Vector3's built-in comparison
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                Vector3 vertex = vertices[i];
+                bool foundGroup = false;
+
+                // Look for existing vertex position within small threshold
+                foreach (var key in vertexGroups.Keys)
+                {
+                    if (Vector3.Distance(key, vertex) < 0.0001f)
+                    {
+                        vertexGroups[key].Add(i);
+                        foundGroup = true;
+                        break;
+                    }
+                }
+
+                if (!foundGroup)
+                {
+                    vertexGroups[vertex] = new List<int> { i };
+                }
+            }
+
+            // Calculate face normals and contribute to vertex normals
+            for (int i = 0; i < triangles.Length; i += 3)
+            {
+                int a = triangles[i];
+                int b = triangles[i + 1];
+                int c = triangles[i + 2];
+
+                Vector3 normal = Vector3.Cross(
+                    vertices[b] - vertices[a],
+                    vertices[c] - vertices[a]
+                ).normalized;
+
+                normals[a] += normal;
+                normals[b] += normal;
+                normals[c] += normal;
+            }
+
+            // Average and normalize normals for shared vertices
+            foreach (var group in vertexGroups)
+            {
+                Vector3 averageNormal = Vector3.zero;
+                foreach (int index in group.Value)
+                {
+                    averageNormal += normals[index];
+                }
+                averageNormal.Normalize();
+
+                foreach (int index in group.Value)
+                {
+                    normals[index] = averageNormal;
+                }
+            }
+
+            return normals;
         }
     }
 }

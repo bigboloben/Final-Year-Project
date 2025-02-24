@@ -2,6 +2,7 @@ using UnityEngine;
 using System.Collections;
 using TMPro;
 using UnityEngine.UI;
+using System.Collections.Generic;
 
 namespace Assets.TrackGeneration
 {
@@ -28,7 +29,7 @@ namespace Assets.TrackGeneration
         public float trackHeight = 0.1f;
         public float wallHeight = 0.5f;
         public float wallWidth = 0.25f;
-        public int segments = 2;
+        public float segments = 0.2f;
         public float banking = 15f;
         public int supportCount = 20;
         public int pointCount = 150;
@@ -38,7 +39,7 @@ namespace Assets.TrackGeneration
         public float cameraHeight = 80f;
 
         [Header("Car Settings")]
-        public GameObject carPrefab;
+        public List<GameObject> carPrefabs;
         public Vector3 cameraOffset = new Vector3(0, 3, -8);
         public Vector3 rearCameraOffset = new Vector3(0, 3, 8);
         public float cameraFollowSpeed = 6f;
@@ -128,7 +129,7 @@ namespace Assets.TrackGeneration
             CarSpawner carSpawner = carSpawnerObj.AddComponent<CarSpawner>();
 
             // Configure car spawner
-            carSpawner.carPrefab = carPrefab;
+            carSpawner.carPrefab = carPrefabs[Random.Range(0, carPrefabs.Count - 1)];
             carSpawner.trackHandler = trackHandler;
             carSpawner.cameraOffset = cameraOffset;
             carSpawner.rearCameraOffset = rearCameraOffset;

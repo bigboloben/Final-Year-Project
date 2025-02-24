@@ -35,7 +35,7 @@ namespace Assets.TrackGeneration
 
             for (int i = 0; i < centerSegments.Count; i++)
             {
-                int numberOfPoints = Mathf.Max(32, (int)(centerSegments[i].GetLength() * parameters.SegmentsPerUnit));
+                int numberOfPoints = Mathf.Max(5, Mathf.RoundToInt(centerSegments[i].GetLength() * parameters.SegmentsPerUnit));
 
                 
                 float lengthDiff = Mathf.Abs(leftSegments[i].GetLength() - rightSegments[i].GetLength());

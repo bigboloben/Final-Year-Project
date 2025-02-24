@@ -38,7 +38,7 @@ namespace Assets.TrackGeneration
         public float trackHeight = 0.1f;
         public float wallHeight = 0.5f;
         public float wallWidth = 0.25f;
-        public int segments = 2;
+        public float segments = 1/5f;
         public float banking = 15f;
         public int supportCount = 20;
         public Material trackMaterial;
@@ -69,6 +69,8 @@ namespace Assets.TrackGeneration
         private TrackParameters trackParameters;
 
         private float[] heights;
+
+        public int surfaceInstanceID;
 
 
         void Awake()
@@ -241,6 +243,10 @@ namespace Assets.TrackGeneration
             {
                 trackMesh = generatedMesh;
                 trackMesh.transform.SetParent(transform);
+                //var track = trackMesh.transform.Find("Track").gameObject;
+                var surface = trackMesh.transform.Find("TrackSurface").gameObject;
+                surfaceInstanceID = surface.GetComponent<MeshCollider>().GetInstanceID();
+                //Debug.Log($"Surface instance ID: {surfaceInstanceID}");
             }
         }
 

@@ -1,5 +1,6 @@
 using UnityEngine;
 using Assets.TrackGeneration;
+using UnityEditor.Rendering;
 
 public class CarSpawner : MonoBehaviour
 {
@@ -82,6 +83,8 @@ public class CarSpawner : MonoBehaviour
             {
                 followScript.offset = cameraOffset;
                 followScript.followSpeed = cameraFollowSpeed;
+                followScript.rearView = true;
+
             }
             else 
             {
@@ -89,8 +92,8 @@ public class CarSpawner : MonoBehaviour
                 cam.enabled = false;
                 followScript.followSpeed = 10f;
                 cameraObj.GetComponent<AudioListener>().enabled = false;
-                //followScript.front = true;
-            
+                followScript.rearView= false;
+
             }
             followScript.followSpeed = cameraFollowSpeed;
             followScript.rotationSpeed = cameraRotationSpeed;
