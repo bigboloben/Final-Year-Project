@@ -95,6 +95,7 @@ namespace Assets.TrackGeneration
             collider.sharedMesh = mesh;
             collider.material = physics;
 
+            wallObject.tag = "Wall";
             wallObject.layer = LayerMask.NameToLayer("Outlines");
 
             return wallObject;

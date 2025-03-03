@@ -34,13 +34,14 @@ namespace Assets.TrackGeneration
         private GameObject leftSplineObject;
 
         [Header("Track Settings")]
-        public float trackWidth = 100f;
+        public float trackWidth = 12f;
         public float trackHeight = 0.1f;
         public float wallHeight = 0.5f;
-        public float wallWidth = 0.25f;
-        public float segments = 1/5f;
+        public float wallWidth = 0.5f;
+        public float segments = 1f;
         public float banking = 15f;
         public int supportCount = 20;
+
         public Material trackMaterial;
         public Material wallMaterial;
         public PhysicsMaterial wallPhysicsMaterial;
@@ -100,7 +101,7 @@ namespace Assets.TrackGeneration
 
         void Start()
         {
-            GenerateTrack(GenerationStrategy.GridWithNoise);
+            //GenerateTrack(GenerationStrategy.GridWithNoise);
         }
 
         private void OnSpacePerformed(InputAction.CallbackContext context)
@@ -122,7 +123,7 @@ namespace Assets.TrackGeneration
             UpdateCameraPosition();
         }
 
-        private void GenerateTrack(GenerationStrategy generation)
+        public void GenerateTrack(GenerationStrategy generation)
         {
             // Clear existing objects
             if (trackMesh != null) Destroy(trackMesh);
@@ -161,18 +162,13 @@ namespace Assets.TrackGeneration
                 checkpoints.Clear();
             }
 
-
-
             points = new List<Vector2>();
             graph = new Graph();
             cycles = new List<Cycle>();
 
-
             GeneratePoints(generation);
- 
 
             heights = GenerateSmoothArray(points.Count);
-            //heights = null;
 
             delaunayTriangulation = new DelaunayTriangulation(points);
             graph = delaunayTriangulation.Compute();
@@ -194,16 +190,15 @@ namespace Assets.TrackGeneration
             rightSplineObject.SetActive(false);
             leftSplineObject.SetActive(false);
             trackSpline = cycle.CreateSmoothedSpline(splineObject, heights: heights);
-            (Cycle, Cycle) offsetCycles = cycle.GetOffsetCycles(trackWidth/2);
+            (Cycle, Cycle) offsetCycles = cycle.GetOffsetCycles(trackWidth / 2);
             rightSpline = offsetCycles.Item1.CreateSmoothedSpline(rightSplineObject, heights: heights);
             leftSpline = offsetCycles.Item2.CreateSmoothedSpline(leftSplineObject, heights: heights);
 
             CenterSplines();
 
             CreateTrackMeshFromSplines();
-            
+
             GenerateCheckpoints();
-            
         }
 
         private void CreateTrackMeshFromSplines()
@@ -324,6 +319,7 @@ namespace Assets.TrackGeneration
 
                 // Make the camera look down at the track
                 trackCamera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);  // Rotate to look straight down
+                trackCamera.GetComponent<Camera>().enabled = false;
             }
         }
 
@@ -379,6 +375,15 @@ namespace Assets.TrackGeneration
                 centerPoints.Add(point);
             }
 
+            // Ensure leftPoints and rightPoints are not null
+            if (trackMeshGenerator.splinePoints == null || trackMeshGenerator.splinePoints.Count < 3)
+            {
+                Debug.LogError("Spline points are not properly generated!");
+                return;
+            }
+            Debug.Log($"Left Points: {trackMeshGenerator.splinePoints[0].Length}, Right Points: {trackMeshGenerator.splinePoints[2].Length}");
+
+
             // Generate checkpoints using the sampled points
             checkpoints = CheckpointGenerator.GenerateCheckpoints(
                 leftPoints: trackMeshGenerator.splinePoints[0],
@@ -386,8 +391,7 @@ namespace Assets.TrackGeneration
                 trackObject: trackMesh
             );
 
-
-            //Debug.Log($"Generated {checkpoints.Count} checkpoints");
+            Debug.Log($"Generated {checkpoints.Count} checkpoints");
         }
 
         public List<Checkpoint> GetCheckpoints()

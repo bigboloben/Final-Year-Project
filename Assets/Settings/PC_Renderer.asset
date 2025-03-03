@@ -21,6 +21,31 @@ MonoBehaviour:
       surfaceData: 2
     screenSpaceSettings:
       normalBlend: 0
+--- !u!114 &-552992610101631357
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a8cd37c7a33b5d14e8bed7551bab9209, type: 3}
+  m_Name: OutlineRenderFeature
+  m_EditorClassIdentifier: 
+  m_Active: 0
+  shaderSettings:
+    outlineScale: 1.2
+    robertsCrossMultiplier: 0.65
+    depthThreshold: 10
+    outlineColor: {r: 0, g: 0, b: 0, a: 1}
+    normalThreshold: 30
+    steepAngleThreshold: 1.5
+    steepAngleMultiplier: 3
+  injectionPoint: 350
+  layerMask:
+    serializedVersion: 2
+    m_Bits: 1024
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -47,10 +72,9 @@ MonoBehaviour:
     probeVolumeBlendStatesCS: {fileID: 7200000, guid: b9a23f869c4fd45f19c5ada54dd82176, type: 3}
   m_RendererFeatures:
   - {fileID: 7833122117494664109}
-  - {fileID: 5610271647043805346}
   - {fileID: -7171195261211123533}
-  - {fileID: 6411058727514339712}
-  m_RendererFeatureMap: ad6b866f10d7b46ca2e07da756b0db4db3e08b90e7cb7a9c80f9a807f2a7f858
+  - {fileID: -552992610101631357}
+  m_RendererFeatureMap: ad6b866f10d7b46cb3e08b90e7cb7a9c83e679a7266053f8
   m_UseNativeRenderPass: 1
   xrSystemData: {fileID: 0}
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}

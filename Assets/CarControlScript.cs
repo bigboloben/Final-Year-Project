@@ -11,6 +11,7 @@ public class CarControlScript : MonoBehaviour
     public TrackHandler trackHandler;
     //private CheckpointManager checkpointManager;
 
+
     CarControls controls;
     private float accelerationInput;
     private float reverseInput;
@@ -30,6 +31,7 @@ public class CarControlScript : MonoBehaviour
     private float heightOffset = 0.05f;   // Height of car body above sphere
 
     [Header("Visual Effects")]
+    public bool enableVisualEffects = true;
     private float bodyRollForce = 10f;
     private float bodyRollSpeed = 10f;
     public Transform vehicleModel;  // Reference to vehicle-racer
@@ -48,6 +50,7 @@ public class CarControlScript : MonoBehaviour
 
 
     [Header("Grip Settings")]
+    public float downforce = 30f;
     public float sidewaysGripFactor = 2f;     // Resistance to sliding sideways
     public float forwardGripFactor = 1.5f;    // Forward/backward grip
     public float maxVelocity = 30f;           // Maximum speed
@@ -57,7 +60,7 @@ public class CarControlScript : MonoBehaviour
 
 
     [Header("Drift Settings")]
-    private bool isDrifting;
+    public bool isDrifting;
     private float driftTime;
     private float currentBoostPower;
     private float driftDirection;
@@ -82,14 +85,18 @@ public class CarControlScript : MonoBehaviour
 
     void Awake()
     {
-        InitializeControls();
-        Physics.ContactModifyEventCCD += PreventGhostBumps;
-        Physics.ContactModifyEvent += PreventGhostBumps;
+        //Debug.Log("Awake started");
+        //InitializeControls();
+        //Debug.Log("Controls initialized");
+        // Don't register physics events yet
+        //Debug.Log("Awake completed");
     }
     void OnEnable()
     {
         InitializeControls();
         controls.Enable();
+        Physics.ContactModifyEventCCD += PreventGhostBumps;
+        Physics.ContactModifyEvent += PreventGhostBumps;
     }
 
     private void OnDisable()
@@ -125,7 +132,7 @@ public class CarControlScript : MonoBehaviour
         }
     }
 
-    
+
 
     private void InitializeControls()
     {
@@ -186,6 +193,7 @@ public class CarControlScript : MonoBehaviour
     }
     void Start()
     {
+        //Debug.Log("Start method beginning");
         sphereTransform = transform;
         carBodyTransform = transform.Find("CarBody");
         vehicleModel = carBodyTransform.Find("CarModel");
@@ -259,9 +267,22 @@ public class CarControlScript : MonoBehaviour
         if (trackHandler != null)
         {
             var (startPos1, startPos2, startRot) = trackHandler.GetTrackStartTransform();
-            transform.position = startPos1;
-            transform.rotation = startRot;
+
+            // Validate position before applying
+            if (!float.IsInfinity(startPos1.x) && !float.IsNaN(startPos1.x) &&
+                !float.IsInfinity(startPos1.y) && !float.IsNaN(startPos1.y) &&
+                !float.IsInfinity(startPos1.z) && !float.IsNaN(startPos1.z))
+            {
+                transform.position = startPos1;
+                transform.rotation = startRot;
+            }
+            else
+            {
+                Debug.LogError("Invalid starting position from track handler!");
+                transform.position = new Vector3(0, 1, 0); // Fallback position
+            }
         }
+        //Invoke("RegisterPhysicsEvents", 0.1f);
     }
 
     void TrackReset()
@@ -272,6 +293,15 @@ public class CarControlScript : MonoBehaviour
 
     void FixedUpdate()
     {
+        //if (float.IsNaN(transform.position.x) || float.IsInfinity(transform.position.x) ||
+        //    float.IsNaN(transform.position.y) || float.IsInfinity(transform.position.y) ||
+        //    float.IsNaN(transform.position.z) || float.IsInfinity(transform.position.z))
+        //{
+        //    ResetPosition();
+        //    return;
+        //}
+
+        //Debug.Log($"Reverse Input: {reverseInput}, Accel Input: {accelerationInput}");    
         if (reset)
         {
             ResetPosition();
@@ -290,6 +320,7 @@ public class CarControlScript : MonoBehaviour
     void Update()
     {
         // Put visual updates in Update
+        if (!enableVisualEffects) return;
         UpdateCarBodyPosition();
         UpdateBodyRoll();
         UpdateWheelTurn();
@@ -298,6 +329,8 @@ public class CarControlScript : MonoBehaviour
 
     private void PreventGhostBumps(PhysicsScene scene, NativeArray<ModifiableContactPair> contactPairs)
     {
+
+        //return;
         Vector3 groundNormal = Vector3.up;
         RaycastHit hit;
         float sphereRadius = 0.5f;
@@ -356,12 +389,19 @@ public class CarControlScript : MonoBehaviour
         {
             averageHistoricalNormal += normal;
         }
-        averageHistoricalNormal /= normalHistory.Count;
+
+        // Prevent division by zero
+        if (normalHistory.Count > 0)
+        {
+            averageHistoricalNormal /= normalHistory.Count;
+        }
 
         // Lerp between current normal and historical average
         Vector3 smoothedNormal = Vector3.Lerp(currentNormal, averageHistoricalNormal, smoothingFactor);
 
-        // Ensure the normal is normalized
+        if (smoothedNormal.sqrMagnitude < 0.001f)
+            return Vector3.up; // Return safe default normal
+
         return smoothedNormal.normalized;
     }
 
@@ -560,9 +600,14 @@ public class CarControlScript : MonoBehaviour
 
     void ApplyGrip()
     {
-
         // Get the velocity relative to the car body's orientation instead of the sphere
         Vector3 localVelocity = carBodyTransform.InverseTransformDirection(sphereRb.linearVelocity);
+
+        if (localVelocity.magnitude > 1)
+        { 
+            Vector3 downwardForce = -transform.up * downforce;
+            sphereRb.AddForce(downwardForce, ForceMode.Force);
+        }
 
         // Calculate desired velocity (what we want) vs current velocity (what we have)
         float desiredSidewaysVelocity = 0f; // We want zero sideways velocity for grip
@@ -601,15 +646,18 @@ public class CarControlScript : MonoBehaviour
         Vector3 forwardDirection = carBodyTransform.forward;
         float currentForce = accelerationInput * accelerationForce * reduceFactor;
 
+        //// Add maximum force limit
+        //currentForce = Mathf.Clamp(currentForce, 0f, 1000f);
+
         sphereRb.AddForce(forwardDirection * currentForce, ForceMode.Force);
-
-
     }
 
     void Reversing()
     {
         Vector3 backwardsDirection = -carBodyTransform.forward;
         float currentForce = reverseInput * reverseForce * reduceFactor;
+
+        //currentForce = Mathf.Clamp(currentForce, 0f, 1000f);
 
         sphereRb.AddForce(backwardsDirection * currentForce, ForceMode.Force);
     }
@@ -698,7 +746,7 @@ public class CarControlScript : MonoBehaviour
         carBodyTransform.position = Vector3.Lerp(currentPosition, targetPosition, Time.fixedDeltaTime * 10f);
     }
 
-    private void ResetPosition()
+    public void ResetPosition()
     {
         if (trackHandler != null)
         {
@@ -739,4 +787,38 @@ public class CarControlScript : MonoBehaviour
         }
         return 0f;
     }
+
+
+
+
+    public void SetAccelerationInput(float value)
+    {
+        accelerationInput = Mathf.Clamp01(value);
+    }
+
+    public void SetSteeringInput(float value)
+    {
+        steeringInput = Mathf.Clamp(value, -1f, 1f);
+    }
+
+    public void SetReverseInput(float value)
+    {
+        reverseInput = Mathf.Clamp01(value);
+    }
+
+    public void SetHandbrakeInput(bool value)
+    {
+        if (value)
+        {
+            TryStartDrift();
+        }
+        else
+        {
+            if (isDrifting)
+            {
+                EndDrift();
+            }
+        }
+    }
+
 }

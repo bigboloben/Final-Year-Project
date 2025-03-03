@@ -14,6 +14,7 @@ namespace Assets.TrackGeneration
         public List<float> lapTimes = new List<float>();
         public bool hasFinishedRace = false;
         public float raceCompletionTime = 0f;
+        public bool isAgent = false; // Flag to identify ML agents vs human players
     }
 
     public class RaceManager : MonoBehaviour
@@ -23,6 +24,7 @@ namespace Assets.TrackGeneration
         [Header("Race Settings")]
         public int totalLaps = 3;
         public float countdownTime = 3f;
+        public bool skipCountdownForTraining = true; // Skip countdown for ML training
 
         // Race state
         private bool isRaceActive = false;
@@ -47,7 +49,6 @@ namespace Assets.TrackGeneration
             if (Instance == null)
             {
                 Instance = this;
-                DontDestroyOnLoad(gameObject);
             }
             else
             {
@@ -85,11 +86,23 @@ namespace Assets.TrackGeneration
         public void InitializeCheckpoints(List<Checkpoint> checkpoints)
         {
             this.checkpoints = checkpoints;
-            foreach (var checkpoint in checkpoints)
+            if (checkpoints != null)
             {
-                checkpoint.Initialize(this);
+                foreach (var checkpoint in checkpoints)
+                {
+                    if (checkpoint != null)
+                    {
+                        checkpoint.Initialize(this);
+                    }
+                }
+                //Debug.Log($"Initialized RaceManager with {checkpoints.Count} checkpoints");
+
+                // Auto-start race if we're in training mode with agents
+                if (HasAgentsOnly() && skipCountdownForTraining)
+                {
+                    StartRace();
+                }
             }
-            //Debug.Log($"Initialized RaceManager with {checkpoints.Count} checkpoints");
         }
 
         public void RegisterPlayer(GameObject playerCar, string playerName = "Player")
@@ -100,14 +113,49 @@ namespace Assets.TrackGeneration
                 {
                     playerName = playerName,
                     currentLap = 0,
-                    nextCheckpointIndex = 0
+                    nextCheckpointIndex = 0,
+                    isAgent = false
                 });
             }
         }
 
+        public void RegisterAgent(GameObject agentCar, string agentName = "Agent")
+        {
+            if (!playerStats.ContainsKey(agentCar))
+            {
+                playerStats.Add(agentCar, new PlayerRaceStats
+                {
+                    playerName = agentName,
+                    currentLap = 0,
+                    nextCheckpointIndex = 0,
+                    isAgent = true
+                });
+            }
+        }
+
+        // Check if we only have ML agents registered (for training)
+        private bool HasAgentsOnly()
+        {
+            if (playerStats.Count == 0) return false;
+
+            foreach (var stats in playerStats.Values)
+            {
+                if (!stats.isAgent) return false;
+            }
+            return true;
+        }
+
         public void CheckpointTriggerEntered(GameObject player, Checkpoint checkpoint)
         {
-            if (!isRaceActive || !playerStats.ContainsKey(player)) return;
+            if (!playerStats.ContainsKey(player)) return;
+
+            // Start race automatically if it's not active but an agent passes a checkpoint
+            if (!isRaceActive && playerStats[player].isAgent)
+            {
+                StartRace();
+            }
+
+            if (!isRaceActive) return;
 
             var stats = playerStats[player];
             int checkpointIndex = checkpoints.IndexOf(checkpoint);
@@ -168,10 +216,18 @@ namespace Assets.TrackGeneration
 
         public void InitiateRaceStart()
         {
-            countdownTimer = countdownTime;
-            foreach (var stats in playerStats.Values)
+            // If we're in training mode with just agents, skip countdown
+            if (HasAgentsOnly() && skipCountdownForTraining)
             {
-                ResetPlayerStats(stats);
+                StartRace();
+            }
+            else
+            {
+                countdownTimer = countdownTime;
+                foreach (var stats in playerStats.Values)
+                {
+                    ResetPlayerStats(stats);
+                }
             }
         }
 
@@ -179,6 +235,13 @@ namespace Assets.TrackGeneration
         {
             isRaceActive = true;
             raceTimer = 0f;
+
+            // Reset all stats when the race starts
+            foreach (var stats in playerStats.Values)
+            {
+                ResetPlayerStats(stats);
+            }
+
             OnRaceStart?.Invoke();
         }
 
@@ -218,7 +281,9 @@ namespace Assets.TrackGeneration
         public Vector3 GetNextCheckpointPosition(GameObject player)
         {
             if (!playerStats.ContainsKey(player) || checkpoints.Count == 0) return Vector3.zero;
-            return checkpoints[playerStats[player].nextCheckpointIndex].transform.position;
+            int nextIdx = playerStats[player].nextCheckpointIndex;
+            if (nextIdx < 0 || nextIdx >= checkpoints.Count) return Vector3.zero;
+            return checkpoints[nextIdx].transform.position;
         }
         public int GetTotalCheckpoints() => checkpoints.Count;
     }

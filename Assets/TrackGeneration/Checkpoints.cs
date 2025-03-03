@@ -37,6 +37,12 @@ namespace Assets.TrackGeneration
             int numberOfCheckpoints = 50,
             float checkpointHeight = 5f)
         {
+            if (leftPoints == null || rightPoints == null)
+            {
+                Debug.LogError("Left or right points array is null!");
+                return new List<Checkpoint>();
+            }
+
             if (leftPoints.Length != rightPoints.Length)
             {
                 Debug.LogError("Left and right point arrays must have the same length!");

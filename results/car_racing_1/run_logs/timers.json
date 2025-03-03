@@ -1,0 +1,42 @@
+{
+    "name": "root",
+    "metadata": {
+        "timer_format_version": "0.1.0",
+        "start_time_seconds": "1741025516",
+        "python_version": "3.9.13 (tags/v3.9.13:6de2ca5, May 17 2022, 16:36:42) [MSC v.1929 64 bit (AMD64)]",
+        "command_line_arguments": "D:\\CompSci Final Year Project\\CompSci Final Year Project\\venv\\Scripts\\mlagents-learn car_agent_config.yaml --run-id=car_racing_1",
+        "mlagents_version": "0.30.0",
+        "mlagents_envs_version": "0.30.0",
+        "communication_protocol_version": "1.5.0",
+        "pytorch_version": "2.6.0+cpu",
+        "numpy_version": "1.21.2",
+        "end_time_seconds": "1741025600"
+    },
+    "total": 83.9511304,
+    "count": 1,
+    "self": 0.020051599999987957,
+    "children": {
+        "run_training.setup": {
+            "total": 0.09882450000000009,
+            "count": 1,
+            "self": 0.09882450000000009
+        },
+        "TrainerController.start_learning": {
+            "total": 83.8322543,
+            "count": 1,
+            "self": 0.00017470000001651442,
+            "children": {
+                "TrainerController._reset_env": {
+                    "total": 83.83205969999999,
+                    "count": 1,
+                    "self": 83.83205969999999
+                },
+                "TrainerController._save_models": {
+                    "total": 1.9899999998074236e-05,
+                    "count": 1,
+                    "self": 1.9899999998074236e-05
+                }
+            }
+        }
+    }
+}

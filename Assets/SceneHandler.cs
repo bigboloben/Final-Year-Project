@@ -25,11 +25,11 @@ namespace Assets.TrackGeneration
         public GameObject floorPrefab;
 
         [Header("Track Parameters")]
-        public float trackWidth = 100f;
+        public float trackWidth = 12f;
         public float trackHeight = 0.1f;
         public float wallHeight = 0.5f;
-        public float wallWidth = 0.25f;
-        public float segments = 0.2f;
+        public float wallWidth = 0.5f;
+        public float segments = 1f;
         public float banking = 15f;
         public int supportCount = 20;
         public int pointCount = 150;
@@ -50,6 +50,11 @@ namespace Assets.TrackGeneration
         public int totalLaps = 3;
         public float countdownTime = 3f;
 
+        public bool setupCar = true;
+        public bool setupTrack = true;
+        public bool setupFloor = true;
+
+
         void Start()
         {
             StartCoroutine(InitializeScene());
@@ -57,10 +62,10 @@ namespace Assets.TrackGeneration
 
         private IEnumerator InitializeScene()
         {
-            SetupTrackSystem();
-            SetUpFloor();
-            SetUpCarSpawner();
-            SetUpRaceHandler();
+            if (setupTrack) SetupTrackSystem();
+            if (setupFloor) SetUpFloor();
+            if (setupCar) SetUpCarSpawner();
+            if (setupTrack && setupCar) SetUpRaceHandler();
 
             // Wait for player car to be ready
             while (playerCar == null)
@@ -69,7 +74,7 @@ namespace Assets.TrackGeneration
             }
 
             // Now that we have the player car, set up the UI
-            SetupRaceUI();
+            if (setupTrack && setupCar) SetupRaceUI();
             //Debug.Log("Scene initialization complete!");
         }
 
@@ -130,6 +135,7 @@ namespace Assets.TrackGeneration
 
             // Configure car spawner
             carSpawner.carPrefab = carPrefabs[Random.Range(0, carPrefabs.Count - 1)];
+            //carSpawner.carPrefab = carPrefabs[6];
             carSpawner.trackHandler = trackHandler;
             carSpawner.cameraOffset = cameraOffset;
             carSpawner.rearCameraOffset = rearCameraOffset;
@@ -137,8 +143,8 @@ namespace Assets.TrackGeneration
             carSpawner.cameraRotationSpeed = cameraRotationSpeed;
             carSpawner.cameraLookSensitivity = cameraLookSensitivity;
 
-            // Call SpawnPlayerCar directly
-            carSpawner.SpawnPlayerCar();
+            //// Call SpawnPlayerCar directly
+            //carSpawner.SpawnPlayerCar();
 
             // Wait a short moment then get the player car reference
             StartCoroutine(GetPlayerCarReference(carSpawner));

@@ -101,7 +101,7 @@ Material:
     - _Center_Multiplier: 0
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
-    - _Color_Change: 0.83
+    - _Color_Change: 0.8
     - _Cull: 2
     - _Cutoff: 0.5
     - _Delta: 0.01
@@ -125,7 +125,7 @@ Material:
     - _Metallic: 0
     - _Min: 0.226
     - _Min_Brightness: 0.3
-    - _Noise_Scale: 42
+    - _Noise_Scale: 43
     - _NumberOfColors: 4
     - _Number_Of_Dots: 10
     - _OcclusionStrength: 1
