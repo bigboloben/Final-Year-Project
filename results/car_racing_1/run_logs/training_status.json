@@ -1,4 +1,38 @@
 {
+    "track_rebuild_episodes": {
+        "lesson_num": 0
+    },
+    "max_time_without_checkpoint": {
+        "lesson_num": 0
+    },
+    "speed_reward": {
+        "lesson_num": 0
+    },
+    "checkpoint_reward": {
+        "lesson_num": 0
+    },
+    "CarAgent": {
+        "checkpoints": [
+            {
+                "steps": 69823,
+                "file_path": "results\\car_racing_1\\CarAgent\\CarAgent-69823.onnx",
+                "reward": 2.66331934556365,
+                "creation_time": 1741036605.8021975,
+                "auxillary_file_paths": [
+                    "results\\car_racing_1\\CarAgent\\CarAgent-69823.pt"
+                ]
+            }
+        ],
+        "final_checkpoint": {
+            "steps": 69823,
+            "file_path": "results\\car_racing_1\\CarAgent.onnx",
+            "reward": 2.66331934556365,
+            "creation_time": 1741036605.8021975,
+            "auxillary_file_paths": [
+                "results\\car_racing_1\\CarAgent\\CarAgent-69823.pt"
+            ]
+        }
+    },
     "metadata": {
         "stats_format_version": "0.3.0",
         "mlagents_version": "0.30.0",

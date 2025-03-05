@@ -1,0 +1,41 @@
+{
+    "track_rebuild_episodes": {
+        "lesson_num": 0
+    },
+    "max_time_without_checkpoint": {
+        "lesson_num": 0
+    },
+    "speed_reward": {
+        "lesson_num": 0
+    },
+    "checkpoint_reward": {
+        "lesson_num": 0
+    },
+    "CarAgent": {
+        "checkpoints": [
+            {
+                "steps": 10907,
+                "file_path": "results\\car_racing_4\\CarAgent\\CarAgent-10907.onnx",
+                "reward": 0.8798620352143189,
+                "creation_time": 1741037410.0918674,
+                "auxillary_file_paths": [
+                    "results\\car_racing_4\\CarAgent\\CarAgent-10907.pt"
+                ]
+            }
+        ],
+        "final_checkpoint": {
+            "steps": 10907,
+            "file_path": "results\\car_racing_4\\CarAgent.onnx",
+            "reward": 0.8798620352143189,
+            "creation_time": 1741037410.0918674,
+            "auxillary_file_paths": [
+                "results\\car_racing_4\\CarAgent\\CarAgent-10907.pt"
+            ]
+        }
+    },
+    "metadata": {
+        "stats_format_version": "0.3.0",
+        "mlagents_version": "0.30.0",
+        "torch_version": "2.6.0+cpu"
+    }
+}

@@ -9,14 +9,19 @@ using UnityEngine.UIElements;
 public class CarControlScript : MonoBehaviour
 {
     public TrackHandler trackHandler;
-    //private CheckpointManager checkpointManager;
 
+    // Add a flag to determine if this car is player controlled or AI controlled
+    [Header("Control Settings")]
+    public bool isPlayerControlled = true;
 
-    CarControls controls;
+    // Input values that both player and AI will use
     private float accelerationInput;
     private float reverseInput;
     private float steeringInput;
-    //private bool handbrake;
+    private bool handbrakeInput;
+
+    // Input system for player control
+    private CarControls controls;
     private Transform sphereTransform;  // Reference to the sphere
     private Transform carBodyTransform; // Reference to the car body cube
     private Rigidbody sphereRb;        // Rigidbody of the sphere
@@ -47,8 +52,6 @@ public class CarControlScript : MonoBehaviour
     private ParticleSystem[] smokeParticles = new ParticleSystem[2];
     private TrailRenderer[] trailRenderers = new TrailRenderer[2];
 
-
-
     [Header("Grip Settings")]
     public float downforce = 30f;
     public float sidewaysGripFactor = 2f;     // Resistance to sliding sideways
@@ -57,7 +60,6 @@ public class CarControlScript : MonoBehaviour
     public PhysicsMaterial spherePhysicMaterial;  // Reference to physics material
 
     private float reduceFactor = 1f;
-
 
     [Header("Drift Settings")]
     public bool isDrifting;
@@ -81,31 +83,36 @@ public class CarControlScript : MonoBehaviour
 
     public bool removeBounces = true;
     private float smoothingFactor = 0.5f; // Adjust this value between 0 and 1
-    private Queue<Vector3> normalHistory = new Queue<Vector3>(5); // Keep track of last 5 normals
+    private Vector3 normalAverage = Vector3.zero;
 
     void Awake()
     {
-        //Debug.Log("Awake started");
-        //InitializeControls();
-        //Debug.Log("Controls initialized");
-        // Don't register physics events yet
-        //Debug.Log("Awake completed");
+        // Only initialize controls if this is player controlled
+        if (isPlayerControlled)
+        {
+            InitializeControls();
+        }
     }
+
     void OnEnable()
     {
-        InitializeControls();
-        controls.Enable();
+        if (isPlayerControlled && controls != null)
+        {
+            controls.Enable();
+        }
         Physics.ContactModifyEventCCD += PreventGhostBumps;
         Physics.ContactModifyEvent += PreventGhostBumps;
     }
 
     private void OnDisable()
     {
-        controls.Disable();
-        if (controls != null)
+        if (isPlayerControlled && controls != null)
         {
+            controls.Disable();
             UnsubscribeControls();
         }
+        Physics.ContactModifyEventCCD -= PreventGhostBumps;
+        Physics.ContactModifyEvent -= PreventGhostBumps;
     }
 
     private void OnDestroy()
@@ -132,10 +139,11 @@ public class CarControlScript : MonoBehaviour
         }
     }
 
-
-
     private void InitializeControls()
     {
+        // Only initialize controls for player-controlled cars
+        if (!isPlayerControlled) return;
+
         controls = new CarControls();
         controls.Car.Accelerate.performed += ctx => accelerationInput = ctx.ReadValue<float>();
         controls.Car.Accelerate.canceled += ctx => accelerationInput = 0f;
@@ -148,11 +156,11 @@ public class CarControlScript : MonoBehaviour
         };
         controls.Car.Steer.canceled += ctx => steeringInput = 0f;
         controls.Car.Handbrake.performed += ctx => {
-            //handbrake = true;
+            handbrakeInput = true;
             TryStartDrift();
         };
         controls.Car.Handbrake.canceled += ctx => {
-            //handbrake = false;
+            handbrakeInput = false;
             EndDrift();
         };
 
@@ -162,12 +170,12 @@ public class CarControlScript : MonoBehaviour
         controls.Keyboard.Grid.performed += ctx => TrackReset();
         controls.Keyboard.Circular.performed += ctx => TrackReset();
         controls.Keyboard.Random.performed += ctx => TrackReset();
-
     }
 
     private void UnsubscribeControls()
     {
-        controls = new CarControls();
+        if (!isPlayerControlled || controls == null) return;
+
         controls.Car.Accelerate.performed -= ctx => accelerationInput = ctx.ReadValue<float>();
         controls.Car.Accelerate.canceled -= ctx => accelerationInput = 0f;
         controls.Car.Reverse.performed -= ctx => reverseInput = ctx.ReadValue<float>();
@@ -179,25 +187,28 @@ public class CarControlScript : MonoBehaviour
         };
         controls.Car.Steer.canceled -= ctx => steeringInput = 0f;
         controls.Car.Handbrake.performed -= ctx => {
-            //handbrake = true;
+            handbrakeInput = true;
             TryStartDrift();
         };
         controls.Car.Handbrake.canceled -= ctx => {
-            //handbrake = false;
+            handbrakeInput = false;
             EndDrift();
         };
 
         controls.Car.Reset.performed -= ctx => reset = ctx.ReadValue<float>() > 0;
         controls.Car.Reset.canceled -= ctx => reset = ctx.ReadValue<float>() > 0;
 
+        controls.Keyboard.Grid.performed -= ctx => TrackReset();
+        controls.Keyboard.Circular.performed -= ctx => TrackReset();
+        controls.Keyboard.Random.performed -= ctx => TrackReset();
     }
+
     void Start()
     {
-        //Debug.Log("Start method beginning");
         sphereTransform = transform;
         carBodyTransform = transform.Find("CarBody");
         vehicleModel = carBodyTransform.Find("CarModel");
-        //Debug.LogError($"{vehicleModel.name}");
+
         wheelTransforms[0] = carBodyTransform.Find("frontLeft");
         wheelTransforms[1] = carBodyTransform.Find("frontRight");
         wheelTransforms[2] = carBodyTransform.Find("backLeft");
@@ -228,33 +239,25 @@ public class CarControlScript : MonoBehaviour
         sphereCollider.providesContacts = true;
         colliderInstanceId = sphereCollider.GetInstanceID();
 
-
         if (trackHandler == null)
         {
             Debug.LogError("Track handler not assigned!");
-            
         }
         else
         {
             trackColliderInstanceId = trackHandler.surfaceInstanceID;
         }
 
-        //sphereCollider.contactOffset = 0.05f;
-
-        //sphereRb.interpolation = RigidbodyInterpolation.Interpolate;
         sphereRb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-
         sphereRb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
-
 
         // Ensure the car body has no rigidbody component
         Rigidbody carBodyRb = carBodyTransform.GetComponent<Rigidbody>();
-
-
         if (carBodyRb != null)
         {
             Destroy(carBodyRb);
         }
+
         if (spherePhysicMaterial != null)
         {
             spherePhysicMaterial.bounciness = 0f;        // No bounce
@@ -282,26 +285,19 @@ public class CarControlScript : MonoBehaviour
                 transform.position = new Vector3(0, 1, 0); // Fallback position
             }
         }
-        //Invoke("RegisterPhysicsEvents", 0.1f);
+
+
+        // Log control mode
+        Debug.Log($"Car {gameObject.name} initialized in {(isPlayerControlled ? "PLAYER" : "AI")} control mode");
     }
 
     void TrackReset()
     {
         trackColliderInstanceId = trackHandler.surfaceInstanceID;
-        //ResetPosition();
     }
 
     void FixedUpdate()
     {
-        //if (float.IsNaN(transform.position.x) || float.IsInfinity(transform.position.x) ||
-        //    float.IsNaN(transform.position.y) || float.IsInfinity(transform.position.y) ||
-        //    float.IsNaN(transform.position.z) || float.IsInfinity(transform.position.z))
-        //{
-        //    ResetPosition();
-        //    return;
-        //}
-
-        //Debug.Log($"Reverse Input: {reverseInput}, Accel Input: {accelerationInput}");    
         if (reset)
         {
             ResetPosition();
@@ -311,12 +307,11 @@ public class CarControlScript : MonoBehaviour
             ApplyGrip();
             Driving();
             Reversing();
-            //Braking();
-            Steering(); 
-            //UpdateCarBodyPosition();
+            Steering();
             UpdateDriftAndBoost();
         }
     }
+
     void Update()
     {
         // Put visual updates in Update
@@ -329,91 +324,56 @@ public class CarControlScript : MonoBehaviour
 
     private void PreventGhostBumps(PhysicsScene scene, NativeArray<ModifiableContactPair> contactPairs)
     {
+        if (!removeBounces) return; // Early exit if not needed
 
-        //return;
-        Vector3 groundNormal = Vector3.up;
-        RaycastHit hit;
-        float sphereRadius = 0.5f;
-        float castDistance = groundRayLength;
+        // Avoid raycast every frame - use ground hit data from Update instead
+        Vector3 groundNormal = groundHit.normal;
+        if (groundNormal == Vector3.zero) groundNormal = Vector3.up;
 
-        if (Physics.SphereCast(sphereRb.position, sphereRadius, sphereRb.transform.forward, out hit, castDistance))
+        // Process only contact pairs with our sphere collider
+        for (int pairIndex = 0; pairIndex < contactPairs.Length; pairIndex++)
         {
-            groundNormal = hit.normal;
-        }
+            ModifiableContactPair pair = contactPairs[pairIndex];
 
-        ModifiableContactPair[] ballContactPairs =
-            contactPairs.Where(pair => pair.colliderInstanceID == colliderInstanceId).ToArray();
+            // Quick check if this pair involves our sphere
+            if (pair.colliderInstanceID != colliderInstanceId) continue;
 
-        if (removeBounces)
-        {
-            foreach (ModifiableContactPair pair in ballContactPairs)
+            // Quick check if this pair involves the track
+            if (pair.otherColliderInstanceID != trackColliderInstanceId) continue;
+
+            // Process contacts in this pair
+            for (int i = 0; i < pair.contactCount; i++)
             {
-                if (pair.otherColliderInstanceID == trackColliderInstanceId)
-                {
-                    for (int i = 0; i < pair.contactCount; i++)
-                    {
-                        Vector3 contactNormal = pair.GetNormal(i);
-                        float separation = pair.GetSeparation(i);
-                        Vector3 contactPoint = pair.GetPoint(i);
+                Vector3 contactNormal = pair.GetNormal(i);
 
-                        // Smooth the normal using history
-                        Vector3 smoothedNormal = SmoothNormal(contactNormal);
+                // Use a more efficient smoothing method
+                Vector3 smoothedNormal = FastSmoothNormal(contactNormal);
 
-                        // Calculate angle with smoothed normal
-                        float normalAngle = Vector3.Angle(smoothedNormal, groundNormal);
-
-                        // Visualize both original and smoothed normals
-                        Debug.DrawRay(contactPoint, contactNormal * 2f, Color.red, 3f);
-                        Debug.DrawRay(contactPoint, smoothedNormal * 2f, Color.green, 3f);
-
-                        pair.SetNormal(i, smoothedNormal);
-
-                        // Store the normal for next frame
-                        UpdateNormalHistory(smoothedNormal);
-                    }
-                }
+                // Set the smoothed normal
+                pair.SetNormal(i, smoothedNormal);
             }
         }
     }
 
-    private Vector3 SmoothNormal(Vector3 currentNormal)
+    // Faster version of SmoothNormal that avoids expensive operations
+    private Vector3 FastSmoothNormal(Vector3 currentNormal)
     {
-        if (normalHistory.Count == 0)
+        // Use a simpler exponential moving average approach
+        if (normalAverage == Vector3.zero)
         {
+            normalAverage = currentNormal;
             return currentNormal;
         }
 
-        // Calculate average of historical normals
-        Vector3 averageHistoricalNormal = Vector3.zero;
-        foreach (Vector3 normal in normalHistory)
-        {
-            averageHistoricalNormal += normal;
-        }
+        // Simple lerp between current normal and running average
+        normalAverage = Vector3.Lerp(normalAverage, currentNormal, 1.0f - smoothingFactor);
 
-        // Prevent division by zero
-        if (normalHistory.Count > 0)
-        {
-            averageHistoricalNormal /= normalHistory.Count;
-        }
+        // Ensure normal is normalized
+        if (normalAverage.sqrMagnitude < 0.001f)
+            return Vector3.up;
 
-        // Lerp between current normal and historical average
-        Vector3 smoothedNormal = Vector3.Lerp(currentNormal, averageHistoricalNormal, smoothingFactor);
-
-        if (smoothedNormal.sqrMagnitude < 0.001f)
-            return Vector3.up; // Return safe default normal
-
-        return smoothedNormal.normalized;
+        return normalAverage.normalized;
     }
-
-    private void UpdateNormalHistory(Vector3 newNormal)
-    {
-        normalHistory.Enqueue(newNormal);
-        if (normalHistory.Count > 5) // Keep only last 5 normals
-        {
-            normalHistory.Dequeue();
-        }
-    }
-
 
     private void ApplyEffects()
     {
@@ -451,7 +411,7 @@ public class CarControlScript : MonoBehaviour
 
     private void UpdateWheelTurn()
     {
-        float carVelocity = sphereRb.linearVelocity.magnitude;  
+        float carVelocity = sphereRb.linearVelocity.magnitude;
         float normalisedSpeed = Mathf.Clamp01(Mathf.Abs(carVelocity) / maxVelocity);
         float steerRotation = steeringInput * maxSteeringAngle * steeringCurve.Evaluate(normalisedSpeed) / 3;
 
@@ -459,15 +419,12 @@ public class CarControlScript : MonoBehaviour
         {
             float steeringAmount = steeringInput + (1 * driftDirection);
             steerRotation = -steeringAmount * maxSteeringAngle * steeringCurve.Evaluate(normalisedSpeed) / 3;
-
         }
 
         currentSteerAngle = Mathf.Lerp(currentSteerAngle, steerRotation, Time.deltaTime * 5f);
 
         wheelTransforms[0].localRotation *= Quaternion.Euler(0, currentSteerAngle, 0);
         wheelTransforms[1].localRotation *= Quaternion.Euler(0, currentSteerAngle, 0);
-
-
     }
 
     private void UpdateBodyRoll()
@@ -535,8 +492,6 @@ public class CarControlScript : MonoBehaviour
         }
     }
 
-
-
     private void TryStartDrift()
     {
         float forwardSpeed = Vector3.Dot(sphereRb.linearVelocity, carBodyTransform.forward);
@@ -558,6 +513,7 @@ public class CarControlScript : MonoBehaviour
             carBodyTransform.localRotation = Quaternion.Euler(0, carBodyTransform.localEulerAngles.y, 0);
         }
     }
+
     private void ApplyBoostFromDrift()
     {
         // Determine boost level based on drift time
@@ -572,7 +528,6 @@ public class CarControlScript : MonoBehaviour
         if (accelerationInput < 0.1)
         {
             boostTimeRemaining = 0f;
-
         }
 
         if (boostPower > 0)
@@ -582,9 +537,10 @@ public class CarControlScript : MonoBehaviour
             boostTimeRemaining = maxBoostTime;
         }
     }
+
     void UpdateDriftAndBoost()
     {
-        if (isDrifting&&accelerationInput>0.01f)
+        if (isDrifting && accelerationInput > 0.01f)
         {
             driftTime += Time.fixedDeltaTime;
         }
@@ -604,7 +560,7 @@ public class CarControlScript : MonoBehaviour
         Vector3 localVelocity = carBodyTransform.InverseTransformDirection(sphereRb.linearVelocity);
 
         if (localVelocity.magnitude > 1)
-        { 
+        {
             Vector3 downwardForce = -transform.up * downforce;
             sphereRb.AddForce(downwardForce, ForceMode.Force);
         }
@@ -624,19 +580,13 @@ public class CarControlScript : MonoBehaviour
         // Calculate forces with smoothing to prevent overcorrection
         Vector3 sidewaysForce = carBodyTransform.right * sidewaysVelocityDifference * currentSidewaysGrip;
 
-        // Apply a downward force to improve grip
-        //float downforceAmount = currentSpeed * 5f;
-        //Vector3 downforce = -transform.up * downforceAmount;
-        //sphereRb.AddForce(downforce, ForceMode.Force);
-
         // Apply forces to the sphere's rigidbody
         sphereRb.AddForce(sidewaysForce, ForceMode.Force);
-        //sphereRb.AddForce(downwardForce, ForceMode.Acceleration);
 
         // Limit maximum velocity with smooth clamping
-        if (sphereRb.linearVelocity.magnitude > maxVelocity*reduceFactor)
+        if (sphereRb.linearVelocity.magnitude > maxVelocity * reduceFactor)
         {
-            float slowDownFactor = Mathf.Lerp(1f, (maxVelocity*reduceFactor) / sphereRb.linearVelocity.magnitude, Time.fixedDeltaTime * 5f);
+            float slowDownFactor = Mathf.Lerp(1f, (maxVelocity * reduceFactor) / sphereRb.linearVelocity.magnitude, Time.fixedDeltaTime * 5f);
             sphereRb.linearVelocity *= slowDownFactor;
         }
     }
@@ -645,10 +595,6 @@ public class CarControlScript : MonoBehaviour
     {
         Vector3 forwardDirection = carBodyTransform.forward;
         float currentForce = accelerationInput * accelerationForce * reduceFactor;
-
-        //// Add maximum force limit
-        //currentForce = Mathf.Clamp(currentForce, 0f, 1000f);
-
         sphereRb.AddForce(forwardDirection * currentForce, ForceMode.Force);
     }
 
@@ -656,23 +602,8 @@ public class CarControlScript : MonoBehaviour
     {
         Vector3 backwardsDirection = -carBodyTransform.forward;
         float currentForce = reverseInput * reverseForce * reduceFactor;
-
-        //currentForce = Mathf.Clamp(currentForce, 0f, 1000f);
-
         sphereRb.AddForce(backwardsDirection * currentForce, ForceMode.Force);
     }
-
-    //void Braking()
-    //{
-    //    if (brakeInput>0 && isReversing == false)
-    //    {
-    //        sphereRb.linearDamping = brakeInput * 3f;  // Adjust this value to change braking strength
-    //    }
-    //    else
-    //    {
-    //        sphereRb.linearDamping = 0.1f;  // Normal rolling resistance
-    //    }
-    //}
 
     void Steering()
     {
@@ -746,27 +677,53 @@ public class CarControlScript : MonoBehaviour
         carBodyTransform.position = Vector3.Lerp(currentPosition, targetPosition, Time.fixedDeltaTime * 10f);
     }
 
-    public void ResetPosition()
+    public void ResetVehicle()
     {
         if (trackHandler != null)
         {
             var (startPos1, startPos2, startRot) = trackHandler.GetTrackStartTransform();
-            transform.position = startPos1 + Vector3.up * 0.25f;
+            Vector3 resetPosition;
+            if (isPlayerControlled)
+            {
+                resetPosition = startPos1;
+            }
+            else
+            {
+                resetPosition = startPos2;
+            }
+
+            transform.position = resetPosition + Vector3.up * 0.25f;
             transform.rotation = startRot;
 
             // Reset the physics of the sphere Rigidbody
-            sphereRb.linearVelocity = Vector3.zero;
-            sphereRb.angularVelocity = Vector3.zero;
+            if (sphereRb != null)
+            {
+                // Check if the rigidbody is kinematic before setting velocities
+                bool wasKinematic = sphereRb.isKinematic;
+
+                // Temporarily make non-kinematic to set velocities if needed
+                if (wasKinematic)
+                    sphereRb.isKinematic = false;
+
+                // Now safe to set velocities
+                sphereRb.linearVelocity = Vector3.zero;
+                sphereRb.angularVelocity = Vector3.zero;
+
+                // Restore original kinematic state
+                if (wasKinematic)
+                    sphereRb.isKinematic = true;
+            }
 
             // Reset input values
             accelerationInput = 0f;
             reverseInput = 0f;
             steeringInput = 0f;
+            handbrakeInput = false;
 
             // Reset car body position to match sphere (if applicable)
             if (carBodyTransform != null)
             {
-                carBodyTransform.position = startPos1 + Vector3.up * (0.25f + heightOffset);
+                carBodyTransform.position = resetPosition + Vector3.up * (0.25f + heightOffset);
                 carBodyTransform.rotation = startRot;
             }
 
@@ -777,7 +734,10 @@ public class CarControlScript : MonoBehaviour
         }
     }
 
-
+    public void ResetPosition()
+    {
+        ResetVehicle();
+    }
 
     public float GetCurrentSpeed()
     {
@@ -788,37 +748,51 @@ public class CarControlScript : MonoBehaviour
         return 0f;
     }
 
-
-
-
+    // Methods for external control (for AI)
     public void SetAccelerationInput(float value)
     {
-        accelerationInput = Mathf.Clamp01(value);
+        // Only allow AI to control if not player controlled
+        if (!isPlayerControlled || !Application.isPlaying)
+        {
+            accelerationInput = Mathf.Clamp01(value);
+        }
     }
 
     public void SetSteeringInput(float value)
     {
-        steeringInput = Mathf.Clamp(value, -1f, 1f);
+        // Only allow AI to control if not player controlled
+        if (!isPlayerControlled || !Application.isPlaying)
+        {
+            steeringInput = Mathf.Clamp(value, -1f, 1f);
+        }
     }
 
     public void SetReverseInput(float value)
     {
-        reverseInput = Mathf.Clamp01(value);
+        // Only allow AI to control if not player controlled
+        if (!isPlayerControlled || !Application.isPlaying)
+        {
+            reverseInput = Mathf.Clamp01(value);
+        }
     }
 
     public void SetHandbrakeInput(bool value)
     {
-        if (value)
+        // Only allow AI to control if not player controlled
+        if (!isPlayerControlled || !Application.isPlaying)
         {
-            TryStartDrift();
-        }
-        else
-        {
-            if (isDrifting)
+            handbrakeInput = value;
+            if (value)
             {
-                EndDrift();
+                TryStartDrift();
+            }
+            else
+            {
+                if (isDrifting)
+                {
+                    EndDrift();
+                }
             }
         }
     }
-
 }

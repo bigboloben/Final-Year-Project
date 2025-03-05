@@ -14986,6 +14986,7 @@ GameObject:
   - component: {fileID: 2105699375729087311}
   - component: {fileID: 7693824441857333263}
   - component: {fileID: 326790127691622217}
+  - component: {fileID: 5446630869371038243}
   m_Layer: 10
   m_Name: CarAgentPrefab
   m_TagString: Untagged
@@ -15182,17 +15183,17 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_BrainParameters:
-    VectorObservationSize: 1
+    VectorObservationSize: 14
     NumStackedVectorObservations: 1
     m_ActionSpec:
-      m_NumContinuousActions: 0
-      BranchSizes: 01000000
-    VectorActionSize: 01000000
+      m_NumContinuousActions: 3
+      BranchSizes: 02000000
+    VectorActionSize: 
     VectorActionDescriptions: []
     VectorActionSpaceType: 0
     hasUpgradedBrainParametersWithActionSpec: 1
   m_Model: {fileID: 0}
-  m_InferenceDevice: 0
+  m_InferenceDevice: 2
   m_BehaviorType: 0
   m_BehaviorName: My Behavior
   TeamId: 0
@@ -15219,6 +15220,7 @@ MonoBehaviour:
   carController: {fileID: 1225267920232554623}
   sensorSystem: {fileID: 326790127691622217}
   trackHandler: {fileID: 0}
+  raceManager: {fileID: 0}
   maxTimeWithoutCheckpoint: 30
   maxEpisodeTime: 300
   checkpointReward: 1
@@ -15226,6 +15228,7 @@ MonoBehaviour:
   collisionPenalty: -0.5
   speedReward: 0.001
   completedCheckpointsBeforeNewTrack: 2147483647
+  resetOnCollision: 1
   visualizeTargetDirection: 1
 --- !u!114 &326790127691622217
 MonoBehaviour:
@@ -15241,15 +15244,31 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   raycastOrigin: {fileID: 6165264854487346111}
   sensorLength: 20
-  trackWallMask:
-    serializedVersion: 2
-    m_Bits: 0
+  trackWallTag: Wall
   visualizeRays: 1
   rayCount: 9
   rayAngle: 180
-  lateralRayCount: 4
-  lateralRayLength: 5
+  raycastFrameSkip: 1
+  raycastLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  enableLodSystem: 1
   collisionWarningThreshold: 0.2
+--- !u!114 &5446630869371038243
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6674457689556500837}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3a5c9d521e5ef4759a8246a07d52221e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  DecisionPeriod: 5
+  DecisionStep: 1
+  TakeActionsBetweenDecisions: 1
 --- !u!1 &7062006306672500520
 GameObject:
   m_ObjectHideFlags: 0

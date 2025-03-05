@@ -60,12 +60,36 @@ public class TrainingManager : MonoBehaviour
     public string agentLayerName = "Agent";
     private int agentLayer;
 
+    [Header("Performance Settings")]
+    public int framesToWaitDuringRebuild = 10; // Spread work across frames
+    public bool disableAgentsDuringRebuild = true; // Disable agents during rebuild to reduce load
+    public int maxPointCount = 150; // Maximum number of track points (reduce for performance)
+    public bool useStaggeredAgentReset = true; // Reset agents over multiple frames
+
+    [Header("Episode Synchronization")]
+    public bool synchronizeEpisodes = true; // Whether to synchronize episode resets
+    public float maxWaitTimeForSynchronization = 5f; // Maximum time to wait for all agents
+    public float waitDelayBetweenEpisodes = 0.5f; // Short delay between episodes
+
     // Flag to indicate when setup is complete
     private bool setupComplete = false;
+
+    // Flag to indicate if a track rebuild is in progress
+    private bool rebuildInProgress = false;
+
+    // Episode synchronization
+    private bool episodeResetRequested = false;
+    private int agentsReadyForReset = 0;
+    private int totalActiveAgents = 0;
+    private float episodeResetRequestTime = 5f;
 
     // Event that agents can subscribe to for track rebuilds
     public delegate void TrackRebuildEvent();
     public event TrackRebuildEvent OnTrackRebuilt;
+
+    // NEW: Event for synchronized episode resets
+    public delegate void EpisodeResetEvent();
+    public event EpisodeResetEvent OnEpisodeReset;
 
     void Awake()
     {
@@ -94,8 +118,25 @@ public class TrainingManager : MonoBehaviour
 
     void Start()
     {
+        var episodesBeforeRebuildParam = Academy.Instance.EnvironmentParameters.GetWithDefault("track_rebuild_episodes", episodesBeforeRebuild);
+        episodesBeforeRebuild = (int)episodesBeforeRebuildParam;
+
         // Set up all components in sequence
         StartCoroutine(SetupSequence());
+    }
+
+    void Update()
+    {
+        // Check for episode synchronization timeouts
+        if (episodeResetRequested && synchronizeEpisodes)
+        {
+            float timeWaiting = Time.time - episodeResetRequestTime;
+            if (timeWaiting > maxWaitTimeForSynchronization)
+            {
+                Debug.LogWarning($"Episode synchronization timeout reached. Forcing reset with {agentsReadyForReset}/{totalActiveAgents} agents ready.");
+                StartCoroutine(ResetAllAgentsCoroutine());
+            }
+        }
     }
 
     private IEnumerator SetupSequence()
@@ -165,8 +206,10 @@ public class TrainingManager : MonoBehaviour
         trackHandler.segments = segments;
         trackHandler.banking = banking;
         trackHandler.supportCount = supportCount;
-        trackHandler.PointCount = pointCount;
+        trackHandler.PointCount = Mathf.Min(pointCount, maxPointCount); // Use the minimum for better performance
         trackHandler.CanvasSize = canvasSize;
+
+        trackHandler.trackCamEnabled = true;
 
         // Create and setup camera
         GameObject cameraObj = new GameObject("Track Camera");
@@ -210,8 +253,6 @@ public class TrainingManager : MonoBehaviour
         Debug.Log("Race manager setup complete!");
     }
 
-    // Update the SpawnAgents method in your TrainingManager.cs file
-
     private void SpawnAgents()
     {
         Debug.Log("Spawning agents...");
@@ -230,6 +271,7 @@ public class TrainingManager : MonoBehaviour
             }
         }
         agents.Clear();
+        totalActiveAgents = 0;
 
         // Get start position from track handler
         (Vector3 startPosition1, Vector3 startPosition2, Quaternion startRotation) = trackHandler.GetTrackStartTransform();
@@ -237,6 +279,12 @@ public class TrainingManager : MonoBehaviour
         // Use the first start position for all agents
         Vector3 startPosition = startPosition1;
 
+        // Spread agent creation across multiple frames
+        StartCoroutine(SpawnAgentsOverTime(startPosition, startRotation));
+    }
+
+    private IEnumerator SpawnAgentsOverTime(Vector3 startPosition, Quaternion startRotation)
+    {
         for (int i = 0; i < numberOfAgents; i++)
         {
             try
@@ -279,12 +327,19 @@ public class TrainingManager : MonoBehaviour
             {
                 Debug.LogError($"Error spawning agent {i}: {e.Message}");
             }
+
+            // Wait every 3 agents to spread creation across frames
+            if (i % 3 == 2)
+            {
+                yield return null;
+            }
         }
     }
 
     private IEnumerator AddAgentAfterDelay(GameObject carObject, int index)
     {
-        // Wait one frame
+        // Wait two frames to ensure everything is initialized properly
+        yield return null;
         yield return null;
 
         try
@@ -296,44 +351,49 @@ public class TrainingManager : MonoBehaviour
                 carAgent = carObject.AddComponent<CarAgent>();
             }
 
-            // Now add the TrackSensingSystem
+            // Configure track sensing system
             TrackSensingSystem sensorSystem = carObject.GetComponent<TrackSensingSystem>();
             if (sensorSystem == null)
             {
                 sensorSystem = carObject.AddComponent<TrackSensingSystem>();
-
-                // Configure the sensor system
                 sensorSystem.raycastOrigin = carObject.transform;
                 sensorSystem.rayCount = 9;
                 sensorSystem.rayAngle = 180f;
                 sensorSystem.sensorLength = 20f;
                 sensorSystem.visualizeRays = true;
-
-                Debug.Log($"Created new TrackSensingSystem for {carObject.name}");
             }
             else
             {
                 sensorSystem.raycastOrigin = carObject.transform;
-                Debug.Log($"Found existing TrackSensingSystem on {carObject.name}");
             }
 
-            // Set up all references
+            // Set up references
             carAgent.trackHandler = trackHandler;
             carAgent.raceManager = raceManager;
             carAgent.carController = carObject.GetComponent<CarControlScript>();
+
+            carAgent.carController.isPlayerControlled = false;
+
+            carAgent.carController.enableVisualEffects = false; // Disable visual effects for training
+            sensorSystem.visualizeRays = false; // Disable ray visualization for training
             carAgent.sensorSystem = sensorSystem;
 
-            // Register agent with race manager
-            raceManager.RegisterAgent(carObject, "Agent_" + index);
+            // NEW: Enable reset on collision
+            if (carAgent.GetType().GetField("resetOnCollision") != null)
+            {
+                carAgent.GetType().GetField("resetOnCollision").SetValue(carAgent, true);
+            }
 
-            // Disable independent track generation in CarAgent
+            carAgent.visualizeTargetDirection = true;
+
+            // Register with race manager
+            raceManager.RegisterAgent(carObject, "Agent_" + index);
             carAgent.completedCheckpointsBeforeNewTrack = int.MaxValue;
 
-            // Calculate total observations: 
-            // 9 rays + 2 direction dots + 1 distance + 1 speed + 1 drift status = 14
-            int totalObservations = sensorSystem.rayCount + 5;
+            // Calculate total observations
+            int totalObservations = sensorSystem.rayCount + 5; // 9 rays + 5 other values = 14
 
-            // Add BehaviorParameters component
+            // Configure Behavior Parameters
             Unity.MLAgents.Policies.BehaviorParameters behaviorParams =
                 carObject.GetComponent<Unity.MLAgents.Policies.BehaviorParameters>();
 
@@ -344,21 +404,25 @@ public class TrainingManager : MonoBehaviour
 
             // Set behavior properties
             behaviorParams.BehaviorName = "CarAgent";
+
+            // CRITICAL FIX: This is the correct way to set up the observation and action space
             behaviorParams.BrainParameters.VectorObservationSize = totalObservations;
-            Debug.Log($"Setting VectorObservationSize to {totalObservations} for {carObject.name}");
             behaviorParams.BrainParameters.NumStackedVectorObservations = 1;
 
-            // Create ActionSpec
-            ActionSpec actionSpec = ActionSpec.MakeContinuous(3);
+            // Create a properly configured ActionSpec
+            var actionSpec = new ActionSpec();
 
-            // Add discrete branch for handbrake
+            // 3 continuous actions: steering, acceleration, braking 
+            actionSpec.NumContinuousActions = 3;
+
+            // 1 discrete action branch (handbrake) with 2 possible values (on/off)
             actionSpec.BranchSizes = new int[] { 2 };
 
             behaviorParams.BrainParameters.ActionSpec = actionSpec;
             behaviorParams.TeamId = 0;
 
-            // Add DecisionRequester
-            Unity.MLAgents.DecisionRequester decisionRequester =
+            // Configure decision requester
+            DecisionRequester decisionRequester =
                 carObject.GetComponent<Unity.MLAgents.DecisionRequester>();
 
             if (decisionRequester == null)
@@ -368,42 +432,16 @@ public class TrainingManager : MonoBehaviour
                 decisionRequester.TakeActionsBetweenDecisions = true;
             }
 
-            // Add to our list
+            // Add to tracked agents
             agents.Add(carAgent);
 
-            // Log success
-            if (agents.Count == numberOfAgents)
-            {
-                Debug.Log($"Successfully spawned {numberOfAgents} agents with observation size {totalObservations}");
-            }
+            // Increment active agent count
+            totalActiveAgents++;
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error adding agent component: {e.Message}\n{e.StackTrace}");
+            Debug.LogError($"Error configuring agent: {e.Message}\n{e.StackTrace}");
         }
-    }
-
-    // Add this method for creating or validating a TrackSensingSystem
-    private TrackSensingSystem EnsureSensorSystem(GameObject carObject)
-    {
-        // First check if the car already has a sensor system
-        TrackSensingSystem sensorSystem = carObject.GetComponentInChildren<TrackSensingSystem>();
-
-        if (sensorSystem == null)
-        {
-            // If no sensor system exists, create one
-            GameObject sensorObj = new GameObject("Track Sensing System");
-            sensorObj.transform.SetParent(carObject.transform);
-            sensorObj.transform.localPosition = Vector3.zero; // Position at car center
-            sensorSystem = sensorObj.AddComponent<TrackSensingSystem>();
-
-            // Configure sensor rays (adjust these settings as needed)
-            // If the TrackSensingSystem has public configuration properties, set them here
-
-            Debug.Log($"Created new TrackSensingSystem for {carObject.name}");
-        }
-
-        return sensorSystem;
     }
 
     // This method can be called by CarAgent's Initialize method to get the TrackHandler
@@ -431,6 +469,10 @@ public class TrainingManager : MonoBehaviour
 
     private void CountEpisodes(int academyStepCount)
     {
+        // Skip if we're currently rebuilding or resetting episodes
+        if (rebuildInProgress || episodeResetRequested)
+            return;
+
         // Check if it's time to rebuild based on our own counter
         if (episodeCounter > 0 && episodeCounter % episodesBeforeRebuild == 0)
         {
@@ -448,15 +490,136 @@ public class TrainingManager : MonoBehaviour
         {
             Debug.Log("Training progress: " + episodeCounter + " episodes completed");
         }
+
+        Debug.Log($"Episode counter: {episodeCounter}/{episodesBeforeRebuild}");
+    }
+
+    // NEW: Method for agents to notify they are ready for episode reset
+    public void NotifyAgentReadyForReset(bool forRebuild = false)
+    {
+        // Increment the counter of agents ready for reset
+        agentsReadyForReset++;
+
+        if (forRebuild)
+        {
+            Debug.Log($"Agent ready for rebuild. Ready: {agentsReadyForReset}/{totalActiveAgents}");
+        }
+        else
+        {
+            Debug.Log($"Agent ready for episode reset. Ready: {agentsReadyForReset}/{totalActiveAgents}");
+        }
+
+        // If all agents are ready, proceed with reset
+        if (agentsReadyForReset >= totalActiveAgents)
+        {
+            if (forRebuild && episodeCounter >= episodesBeforeRebuild)
+            {
+                Debug.Log("All agents ready for rebuild. Starting track rebuild now.");
+                StartCoroutine(RebuildTrackAfterDelay());
+            }
+            else if (episodeResetRequested)
+            {
+                Debug.Log("All agents ready for episode reset. Resetting all agents now.");
+                StartCoroutine(ResetAllAgentsCoroutine());
+            }
+        }
+    }
+
+    // NEW: Method to initiate a synchronized episode reset
+    // Add a parameter to indicate if this reset is for a rebuild
+    public void RequestEpisodeReset(bool forRebuild = false)
+    {
+        if (!synchronizeEpisodes || episodeResetRequested || rebuildInProgress)
+            return;
+
+        Debug.Log($"Requesting synchronized episode reset for all agents (forRebuild: {forRebuild})");
+
+        // Reset the counter and set the request flag
+        episodeResetRequested = true;
+        episodeResetRequestTime = Time.time;
+        agentsReadyForReset = 0;
+
+        // Notify all agents to finish their current run
+        foreach (var agent in agents)
+        {
+            if (agent != null && agent.gameObject.activeSelf)
+            {
+                // Pass the forRebuild flag to the agents
+                agent.RequestFinishForReset(forRebuild);
+            }
+        }
+    }
+
+    // NEW: Coroutine to reset all agents
+    private IEnumerator ResetAllAgentsCoroutine()
+    {
+        bool shouldRebuildTrack = episodeCounter >= episodesBeforeRebuild;
+
+        // Log what we're doing
+        if (shouldRebuildTrack)
+        {
+            Debug.Log($"Resetting all agents with track rebuild. Episodes: {episodeCounter}/{episodesBeforeRebuild}");
+        }
+
+        // Wait a short delay to let physics stabilize
+        yield return new WaitForSeconds(waitDelayBetweenEpisodes);
+
+        // If we should rebuild the track, do that first
+        if (shouldRebuildTrack)
+        {
+            StartCoroutine(RebuildTrackAfterDelay());
+            yield break; // Exit this coroutine, as RebuildTrackAfterDelay will handle agent reset
+        }
+
+
+        // Wait a short delay to let physics stabilize
+        yield return new WaitForSeconds(waitDelayBetweenEpisodes);
+
+        // Reset episodeResetRequested flag first so agents can request new resets
+        episodeResetRequested = false;
+
+        // Reset all agents in a staggered fashion
+        for (int i = 0; i < agents.Count; i++)
+        {
+            var agent = agents[i];
+            if (agent != null && agent.gameObject.activeSelf)
+            {
+                // Reposition the agent
+                RepositionAgent(agent, i);
+
+                // Wait every 2 agents to give Unity time to process physics
+                if (i % 2 == 1)
+                {
+                    yield return new WaitForFixedUpdate();
+                }
+            }
+        }
+
+        // Wait for physics to settle
+        yield return new WaitForFixedUpdate();
+
+        // Trigger the OnEpisodeReset event that agents are listening for
+        OnEpisodeReset?.Invoke();
+
+        // Final reset of counters
+        agentsReadyForReset = 0;
+
+        IncrementEpisodeCounter();
     }
 
     private void CheckForRebuild()
     {
+        // Skip if already rebuilding or reset is requested
+        if (rebuildInProgress || episodeResetRequested)
+            return;
+
         // Check if we've reached the rebuild threshold
         if (episodeCounter > 0 && episodeCounter % episodesBeforeRebuild == 0)
         {
-            Debug.Log("Rebuilding track after " + episodeCounter + " episodes");
-            StartCoroutine(RebuildTrackAfterDelay());
+            Debug.Log($"Requesting track rebuild after {episodeCounter} episodes");
+
+            // Request a reset SPECIFICALLY for rebuild purposes
+            RequestEpisodeReset(true);  // <-- Set forRebuild to true
         }
     }
 
@@ -475,7 +638,26 @@ public class TrainingManager : MonoBehaviour
 
     private IEnumerator RebuildTrackAfterDelay()
     {
+        // Mark rebuild in progress
+        rebuildInProgress = true;
+        episodeResetRequested = false;
+        agentsReadyForReset = 0;
+
         yield return new WaitForSeconds(trackRebuildDelay);
+
+        // Disable agents during rebuild
+        if (disableAgentsDuringRebuild)
+        {
+            foreach (var agent in agents)
+            {
+                if (agent != null && agent.gameObject != null)
+                {
+                    agent.gameObject.SetActive(false);
+                }
+            }
+        }
+
+        yield return new WaitForSeconds(0.1f); // Let physics settle
 
         // Generate a new track
         GenerateTrack();
@@ -486,40 +668,153 @@ public class TrainingManager : MonoBehaviour
         // Update checkpoints in race manager
         raceManager.InitializeCheckpoints(trackHandler.GetCheckpoints());
 
+        // Wait additional frames for Unity to process changes
+        for (int i = 0; i < framesToWaitDuringRebuild; i++)
+        {
+            yield return null;
+        }
+
         // Notify all agents about track rebuild
         OnTrackRebuilt?.Invoke();
 
-        // Reset all agents
-        foreach (var agent in agents)
+        // Re-enable and reset all agents
+        if (useStaggeredAgentReset)
         {
-            if (agent != null)
+            yield return StartCoroutine(StaggeredAgentReset());
+        }
+        else
+        {
+            // Reset all agents immediately
+            foreach (var agent in agents)
             {
-                agent.ResetForNewTrack();
-                // Use EndEpisode directly - our counter will be updated by the next episode's start
-                agent.EndEpisode();
+                if (agent != null)
+                {
+                    if (disableAgentsDuringRebuild)
+                    {
+                        agent.gameObject.SetActive(true);
+                    }
+
+                    agent.ResetForNewTrack();
+                    // Use EndEpisode directly - our counter will be updated by the next episode's start
+                    agent.EndEpisode();
+                }
             }
         }
 
-        // Reposition agents on the new track
-        RepositionAgentsOnTrack();
+        // Reset the episode counter
+        episodeCounter = 0;
+
+        // Clear rebuild in progress flag
+        rebuildInProgress = false;
     }
 
-    private void RepositionAgentsOnTrack()
+    // Reset agents over multiple frames to spread out the load
+    private IEnumerator StaggeredAgentReset()
     {
+        // Wait a bit for physics to settle after track rebuild
+        yield return new WaitForFixedUpdate();
+        yield return new WaitForFixedUpdate();
+
+        // First position all the agents at their starting positions while still inactive
+        for (int i = 0; i < agents.Count; i++)
+        {
+            var agent = agents[i];
+            if (agent != null)
+            {
+                // Reposition the agent first (while still inactive)
+                RepositionAgent(agent, i);
+
+                // Wait every 2 agents to give Unity time to process physics
+                if (i % 2 == 1)
+                {
+                    yield return new WaitForFixedUpdate();
+                }
+            }
+        }
+
+        // Wait for physics to settle
+        yield return new WaitForFixedUpdate();
+        yield return new WaitForFixedUpdate();
+
+        // Now activate and reset each agent
+        for (int i = 0; i < agents.Count; i++)
+        {
+            var agent = agents[i];
+            if (agent != null)
+            {
+                // Re-enable agent if it was disabled
+                if (disableAgentsDuringRebuild && !agent.gameObject.activeSelf)
+                {
+                    agent.gameObject.SetActive(true);
+                    // Wait a frame for GameObject to fully activate
+                    yield return null;
+                }
+
+                // Then reset its state
+                agent.ResetForNewTrack();
+
+                // End the episode to trigger a new one
+                agent.EndEpisode();
+
+                // Wait every 2 agents to give Unity time to process physics
+                if (i % 2 == 1)
+                {
+                    yield return new WaitForFixedUpdate();
+                }
+            }
+        }
+
+        // Final wait to ensure all physics is settled
+        yield return new WaitForFixedUpdate();
+        yield return new WaitForFixedUpdate();
+    }
+
+    // Reposition a single agent
+    private void RepositionAgent(CarAgent agent, int index)
+    {
+        if (agent == null || agent.transform == null)
+            return;
+
         // Get start position from track handler
         (Vector3 startPosition1, Vector3 startPosition2, Quaternion startRotation) = trackHandler.GetTrackStartTransform();
 
-        // Reposition agents with a bit of spacing to prevent overlap
-        for (int i = 0; i < agents.Count; i++)
-        {
-            if (agents[i] != null)
-            {
-                // Calculate position with offset to prevent overlap
-                Vector3 spawnPosition = startPosition1 + Vector3.right * (i % 3) * agentSpacing + Vector3.forward * (i / 3) * agentSpacing;
+        // Calculate position with offset to prevent overlap
+        Vector3 spawnPosition = startPosition1 + Vector3.right * (index % 3) * agentSpacing + Vector3.forward * (index / 3) * agentSpacing;
 
-                // Update transform
-                agents[i].transform.position = spawnPosition;
-                agents[i].transform.rotation = startRotation;
+        // Reset physics state completely
+        Rigidbody rb = agent.GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            // First reset velocities while still non-kinematic
+            bool wasKinematic = rb.isKinematic;
+
+            // Temporarily make non-kinematic to set velocities
+            if (wasKinematic)
+                rb.isKinematic = false;
+
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.ResetInertiaTensor();
+            rb.Sleep();
+
+            // Restore original kinematic state
+            if (wasKinematic)
+                rb.isKinematic = true;
+        }
+
+        // Force position and rotation update
+        agent.transform.position = spawnPosition;
+        agent.transform.rotation = startRotation;
+
+        // Ensure car controller is also reset
+        CarControlScript carController = agent.GetComponent<CarControlScript>();
+        if (carController != null)
+        {
+            // Check if there's a ResetVehicle method on the car controller and call it
+            var resetMethod = carController.GetType().GetMethod("ResetVehicle");
+            if (resetMethod != null)
+            {
+                resetMethod.Invoke(carController, null);
             }
         }
     }

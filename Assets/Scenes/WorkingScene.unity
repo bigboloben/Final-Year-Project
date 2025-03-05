@@ -503,6 +503,12 @@ MonoBehaviour:
   cameraFollowSpeed: 6
   cameraRotationSpeed: 5
   cameraLookSensitivity: 100
+  enableAICars: 1
+  aiModel: {fileID: 5022602860645237092, guid: 1a4790105de86f2408150cb7a18a22de, type: 3}
+  aiRayCount: 9
+  aiRayAngle: 180
+  aiSensorLength: 20
+  aiLayerName: Agent
   totalLaps: 3
   countdownTime: 3
   setupCar: 1

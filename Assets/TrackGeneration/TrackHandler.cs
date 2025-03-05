@@ -69,6 +69,8 @@ namespace Assets.TrackGeneration
         private TrackMesh trackMeshGenerator;
         private TrackParameters trackParameters;
 
+        public bool trackCamEnabled = false; 
+
         private float[] heights;
 
         public int surfaceInstanceID;
@@ -319,7 +321,7 @@ namespace Assets.TrackGeneration
 
                 // Make the camera look down at the track
                 trackCamera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);  // Rotate to look straight down
-                trackCamera.GetComponent<Camera>().enabled = false;
+                trackCamera.GetComponent<Camera>().enabled = trackCamEnabled;
             }
         }
 

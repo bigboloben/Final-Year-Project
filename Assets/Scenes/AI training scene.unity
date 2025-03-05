@@ -404,7 +404,7 @@ MonoBehaviour:
   - {fileID: 6674457689556500837, guid: f347242efacec8042a7e9d539c027c76, type: 3}
   - {fileID: 6674457689556500837, guid: 4e6184ca7fcd3ba47ad7e3a0e6249f26, type: 3}
   - {fileID: 6674457689556500837, guid: 05733a803570b6f44a6abc31c1928771, type: 3}
-  numberOfAgents: 10
+  numberOfAgents: 1
   agentSpacing: 0
   episodesBeforeRebuild: 100
   trackRebuildDelay: 1
@@ -431,6 +431,13 @@ MonoBehaviour:
   totalLaps: 3
   countdownTime: 3
   agentLayerName: Agent
+  framesToWaitDuringRebuild: 10
+  disableAgentsDuringRebuild: 1
+  maxPointCount: 150
+  useStaggeredAgentReset: 1
+  synchronizeEpisodes: 1
+  maxWaitTimeForSynchronization: 5
+  waitDelayBetweenEpisodes: 0.5
 --- !u!4 &2129650554
 Transform:
   m_ObjectHideFlags: 0
