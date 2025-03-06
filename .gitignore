@@ -321,6 +321,9 @@ __pycache__/
 # Python virtual environment
 venv/
 
+#training data
+results/
+
 # Cake - Uncomment if you are using it
 # tools/**
 # !tools/packages.config

@@ -99,7 +99,7 @@
     <Compile Include="Assets\TutorialInfo\Scripts\Readme.cs" />
     <Compile Include="Assets\TrackGeneration\Track Texture Generator.cs" />
     <Compile Include="Assets\AntiRollBarScript.cs" />
-    <Compile Include="Assets\AI\SentisCarBrain.cs" />
+    <Compile Include="Assets\AI\SimulationSpeedController.cs" />
     <Compile Include="Assets\SceneHandler.cs" />
     <Compile Include="Assets\AI\InferenceCarAgent.cs" />
     <Compile Include="Assets\TrackGeneration\Graph.cs" />

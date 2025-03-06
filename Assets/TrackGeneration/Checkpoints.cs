@@ -14,15 +14,12 @@ namespace Assets.TrackGeneration
 
         private void OnTriggerEnter(Collider other)
         {
-            if (other.CompareTag("Player"))
+            if (other.CompareTag("Player") || other.CompareTag("AI"))
             {
+                // Existing RaceManager code
                 if (raceManager != null)
                 {
                     raceManager.CheckpointTriggerEntered(other.gameObject, this);
-                }
-                else
-                {
-                    Debug.LogError("Race manager is null!");
                 }
             }
         }
