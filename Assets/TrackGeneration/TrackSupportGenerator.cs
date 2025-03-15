@@ -32,6 +32,7 @@ namespace Assets.TrackGeneration
         public GameObject GenerateSupport(int i, Vector3 position, Material material)
         {
             GameObject support = new GameObject($"Support {i}");
+            support.layer = 2;
             MeshFilter meshFilter = support.AddComponent<MeshFilter>();
             MeshRenderer meshRenderer = support.AddComponent<MeshRenderer>();
             meshRenderer.material = material;

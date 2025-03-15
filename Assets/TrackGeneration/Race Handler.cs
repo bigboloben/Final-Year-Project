@@ -254,6 +254,14 @@ namespace Assets.TrackGeneration
             return true;
         }
 
+        public void ResetAgent(GameObject agent)
+        {
+            if (playerStats.ContainsKey(agent))
+            {
+                ResetPlayerStats(playerStats[agent]);
+            }
+        }
+
         private void ResetPlayerStats(PlayerRaceStats stats)
         {
             stats.currentLap = 0;

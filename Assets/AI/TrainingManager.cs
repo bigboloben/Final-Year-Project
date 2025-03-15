@@ -1,11 +1,11 @@
 using Assets.TrackGeneration;
-using System.Collections.Generic;
-using System.Collections;
-using Unity.MLAgents;
-using UnityEngine;
 using System;
-using Unity.MLAgents.Actuators;
+using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
+using Unity.MLAgents;
+using Unity.MLAgents.Actuators;
+using UnityEngine;
 
 public class TrainingManager : MonoBehaviour
 {
@@ -39,7 +39,7 @@ public class TrainingManager : MonoBehaviour
     public float wallWidth = 0.5f;
     public float segments = 1f;
     public float banking = 15f;
-    public int supportCount = 20;
+    public int supportCount = 0;
     public int pointCount = 150;
     public int canvasSize = 1000;
 
@@ -69,8 +69,9 @@ public class TrainingManager : MonoBehaviour
     [Header("Training Cycle")]
     public int episodesBeforeRebuild = 500;
     public float trackRebuildDelay = 1f;
-    public float waitDelayBetweenEpisodes = 0.5f;
     public float maxWaitTimeForSynchronization = 20f;
+    [Tooltip("If true, episode counters reset to 0 after track rebuild. If false, agents continue from their current episode count.")]
+    public bool resetEpisodesAfterRebuild = true;
 
     [Header("Training Curriculum")]
     [Tooltip("Start with strict resets on collision, transition to penalties only for recovery skills")]
@@ -81,40 +82,18 @@ public class TrainingManager : MonoBehaviour
     public bool randomizeStartPositions = true;
     [Tooltip("Maximum offset for randomized starting positions")]
     public float startPositionRandomization = 1.0f;
-    [Tooltip("Occasionally apply random forces to teach recovery (0-1 chance)")]
-    [Range(0, 1)]
-    public float randomPerturbationChance = 0f;
-    [Tooltip("Strength of random perturbations")]
-    public float perturbationStrength = 0f;
-
-    [Header("Enhanced Training Settings")]
-    [Range(1, 100)]
-    public int episodesToIncreaseTimeout = 50;
-    public float initialTimeWithoutCheckpoint = 15f;
-    public float maxTimeWithoutCheckpoint = 60f;
-    [Range(0, 3)]
-    public float initialStartPositionRandomization = 0.2f;
-    [Range(0, 10)]
-    public float maxSteeringAngleChange = 5.0f;
-    public float minSpeed = 5.0f;
 
     // Training progression tracking
-    private int totalEpisodesCompleted = 0;
+    private int totalEpisodesCompleted = 0;  // Total individual episodes completed
+    private int globalEpisodeCounter = 0;    // Global min episode counter that never resets
+    private int lastGlobalCounterBeforeRebuild = 0; // Last global counter value before rebuild
     private int totalLapsCompleted = 0;
     private float bestLapTime = float.MaxValue;
-
-    // Add this variable to track episode stats
-    private List<float> episodeLengths = new List<float>();
-    private List<float> episodeRewards = new List<float>();
-    private float previousEpisodeEndTime = 0f;
-    private int previousEpisodeCheckpoints = 0;
 
     // Training State Management - using an enum for clear state tracking
     public enum TrainingState
     {
         NormalTraining,    // Regular training with no pending resets
-        ResetRequested,    // Reset has been requested, waiting for agents
-        ResetInProgress,   // Reset is actively happening
         RebuildRequested,  // Track rebuild has been requested, waiting for agents
         RebuildInProgress  // Track rebuild is actively happening
     }
@@ -126,8 +105,8 @@ public class TrainingManager : MonoBehaviour
     private int currentEpisode = 0;
     private int lastRebuildEpisode = 0;
 
-    // Synchronization tracking
-    private int agentsReadyForReset = 0;
+    // Synchronization tracking for rebuild only
+    private int agentsReadyForRebuild = 0;
     private int totalActiveAgents = 0;
     private float stateChangeTime = 0f;
 
@@ -135,16 +114,17 @@ public class TrainingManager : MonoBehaviour
     public delegate void TrackRebuildEvent();
     public event TrackRebuildEvent OnTrackRebuilt;
 
-    public delegate void EpisodeResetEvent();
-    public event EpisodeResetEvent OnEpisodeReset;
-
     // Performance tracking
     private int frameCount = 0;
     private float nextLogTime = 0;
     private float nextCurriculumCheckTime = 0;
 
     // Debug logging toggle
-    private bool isDebugLoggingEnabled = true;
+    [SerializeField]
+    private bool isDebugLoggingEnabled = false;
+
+    // OPTIMIZATION: Added thread safety flag
+    private bool isProcessingRebuild = false;
 
     void Awake()
     {
@@ -181,7 +161,7 @@ public class TrainingManager : MonoBehaviour
         episodesToSwitchCollisionMode = (int)Academy.Instance.EnvironmentParameters.GetWithDefault("episodes_to_switch_collision", episodesToSwitchCollisionMode);
         randomizeStartPositions = Academy.Instance.EnvironmentParameters.GetWithDefault("randomize_starts", randomizeStartPositions ? 1.0f : 0.0f) > 0.5f;
         startPositionRandomization = Academy.Instance.EnvironmentParameters.GetWithDefault("start_randomization", startPositionRandomization);
-        randomPerturbationChance = Academy.Instance.EnvironmentParameters.GetWithDefault("perturbation_chance", randomPerturbationChance);
+        resetEpisodesAfterRebuild = Academy.Instance.EnvironmentParameters.GetWithDefault("reset_episodes_after_rebuild", resetEpisodesAfterRebuild ? 1.0f : 0.0f) > 0.5f;
 
         // Initialize and set up all components in sequence
         StartCoroutine(SetupSequence());
@@ -201,8 +181,9 @@ public class TrainingManager : MonoBehaviour
             // Log training progress
             if (isDebugLoggingEnabled)
             {
-                Debug.Log($"[STATS] FPS: {fps:F1} | Total Episodes: {totalEpisodesCompleted} | " +
+                Debug.Log($"[STATS] FPS: {fps:F1} | Global Episodes: {globalEpisodeCounter} | " +
                          $"Current Episode: {currentEpisode} | Laps: {totalLapsCompleted} | " +
+                         $"Strict Resets: {useStrictResets} | " +
                          $"Best Lap: {(bestLapTime < float.MaxValue ? bestLapTime.ToString("F2") + "s" : "None")}");
             }
         }
@@ -214,21 +195,14 @@ public class TrainingManager : MonoBehaviour
             nextCurriculumCheckTime = Time.time + 30f; // Check every 30 seconds
         }
 
-        // Handle state timeouts
-        if (currentState == TrainingState.ResetRequested || currentState == TrainingState.RebuildRequested)
+        // Handle rebuild request timeout
+        if (currentState == TrainingState.RebuildRequested)
         {
             float timeInCurrentState = Time.time - stateChangeTime;
             if (timeInCurrentState > maxWaitTimeForSynchronization)
             {
-                Debug.LogWarning($"[SYNC] Timeout reached waiting for agents. Forcing state transition. Ready: {agentsReadyForReset}/{totalActiveAgents}");
-                if (currentState == TrainingState.ResetRequested)
-                {
-                    StartCoroutine(PerformEpisodeReset());
-                }
-                else if (currentState == TrainingState.RebuildRequested)
-                {
-                    StartCoroutine(PerformTrackRebuild());
-                }
+                Debug.LogWarning($"[SYNC] Timeout reached waiting for agents for rebuild. Forcing state transition. Ready: {agentsReadyForRebuild}/{totalActiveAgents}");
+                StartCoroutine(PerformTrackRebuild());
             }
         }
     }
@@ -237,36 +211,22 @@ public class TrainingManager : MonoBehaviour
     private void UpdateCurriculum()
     {
         // Switch from strict resets to penalty-only mode after threshold
-        if (useStrictResets && totalEpisodesCompleted > episodesToSwitchCollisionMode)
+        if (useStrictResets && globalEpisodeCounter > episodesToSwitchCollisionMode)
         {
             useStrictResets = false;
-            Debug.Log($"[CURRICULUM] Switching to penalty-only mode for collisions after {totalEpisodesCompleted} episodes");
+            Debug.Log($"[CURRICULUM] Switching to penalty-only mode for collisions after {globalEpisodeCounter} global episodes");
         }
 
         // Gradually increase randomness as training progresses
-        float progressFactor = Mathf.Min(1.0f, totalEpisodesCompleted / (float)(episodesToSwitchCollisionMode * 2));
-        startPositionRandomization = Mathf.Lerp(initialStartPositionRandomization, 2.0f, progressFactor);
-        randomPerturbationChance = Mathf.Lerp(0.01f, 0.05f, progressFactor);
-
-        // Update timeout based on progress
-        float timeoutProgressFactor = Mathf.Min(1.0f, totalEpisodesCompleted / (float)episodesToIncreaseTimeout);
-        float currentTimeout = Mathf.Lerp(initialTimeWithoutCheckpoint, maxTimeWithoutCheckpoint, timeoutProgressFactor);
-
-        // Apply the timeout to all agents
-        foreach (var agent in agents)
-        {
-            if (agent != null)
-            {
-                agent.maxTimeWithoutCheckpoint = currentTimeout;
-            }
-        }
+        float progressFactor = Mathf.Min(1.0f, globalEpisodeCounter / (float)(episodesToSwitchCollisionMode * 2));
+        startPositionRandomization = Mathf.Lerp(0.5f, 2.0f, progressFactor);
+        
 
         // Log curriculum updates
         if (isDebugLoggingEnabled)
         {
-            Debug.Log($"[CURRICULUM] Updated parameters: Start randomization = {startPositionRandomization:F2}, " +
-                     $"Perturbation chance = {randomPerturbationChance:F2}, " +
-                     $"Checkpoint timeout = {currentTimeout:F2}s");
+            Debug.Log($"[CURRICULUM] Updated parameters: Start randomization = {startPositionRandomization:F2}, "  +
+                     $"Global episodes: {globalEpisodeCounter}");
         }
     }
 
@@ -342,7 +302,7 @@ public class TrainingManager : MonoBehaviour
         trackHandler.segments = segments;
         trackHandler.banking = banking;
         trackHandler.supportCount = supportCount;
-        trackHandler.PointCount = Mathf.Min(pointCount, maxPointCount); // Use the minimum for better performance
+        trackHandler.PointCount = pointCount; 
         trackHandler.CanvasSize = canvasSize;
 
         trackHandler.trackCamEnabled = true;
@@ -421,6 +381,7 @@ public class TrainingManager : MonoBehaviour
             }
         }
         agents.Clear();
+        agentEpisodeCounts.Clear();
         totalActiveAgents = 0;
 
         // Get start position from track handler
@@ -506,11 +467,12 @@ public class TrainingManager : MonoBehaviour
             TrackSensingSystem sensorSystem = carObject.GetComponent<TrackSensingSystem>();
             if (sensorSystem == null)
             {
+                Transform carBodyTransform = carObject.transform.Find("CarBody");
                 sensorSystem = carObject.AddComponent<TrackSensingSystem>();
-                sensorSystem.raycastOrigin = carObject.transform;
-                sensorSystem.rayCount = 9;
-                sensorSystem.rayAngle = 180f;
-                sensorSystem.sensorLength = 20f;
+                sensorSystem.raycastOrigin = carBodyTransform;
+                //sensorSystem.rayCount = 9;
+                //sensorSystem.rayAngle = 180f;
+                //sensorSystem.sensorLength = 10f;
                 sensorSystem.visualizeRays = false; // Disable for performance
             }
             else
@@ -542,11 +504,8 @@ public class TrainingManager : MonoBehaviour
             raceManager.RegisterAgent(carObject, "Agent_" + index);
             carAgent.completedCheckpointsBeforeNewTrack = int.MaxValue;
 
-            // Apply optimized parameter configuration
-            ConfigureOptimizedAgentParameters(carAgent);
-
             // Calculate total observations
-            int totalObservations = sensorSystem.rayCount + 5; // 9 rays + 5 other values = 14
+            int totalObservations = 40; 
 
             // Configure Behavior Parameters
             Unity.MLAgents.Policies.BehaviorParameters behaviorParams =
@@ -583,7 +542,8 @@ public class TrainingManager : MonoBehaviour
             if (decisionRequester == null)
             {
                 decisionRequester = carObject.AddComponent<Unity.MLAgents.DecisionRequester>();
-                decisionRequester.DecisionPeriod = 5;
+                int decisionFrequency = (int)Mathf.Max(1, 5 / Mathf.Sqrt(Time.timeScale));
+                decisionRequester.DecisionPeriod = decisionFrequency;
                 decisionRequester.TakeActionsBetweenDecisions = true;
             }
 
@@ -599,41 +559,6 @@ public class TrainingManager : MonoBehaviour
         }
     }
 
-    // Configure optimized agent parameters
-    private void ConfigureOptimizedAgentParameters(CarAgent agent)
-    {
-        if (agent == null) return;
-
-        // Set reasonable timeouts based on current curriculum stage
-        float progressFactor = Mathf.Min(1.0f, totalEpisodesCompleted / (float)episodesToIncreaseTimeout);
-        agent.maxTimeWithoutCheckpoint = Mathf.Lerp(initialTimeWithoutCheckpoint, maxTimeWithoutCheckpoint, progressFactor);
-
-        // Start with more lenient no-progress detection and gradually tighten
-        agent.noProgressThreshold = Mathf.Lerp(1.0f, 0.3f, progressFactor);
-        agent.noProgressThresholdTime = Mathf.Lerp(10.0f, 5.0f, progressFactor);
-
-        // Adjust reward weightings
-        agent.speedReward = Mathf.Lerp(0.03f, 0.05f, progressFactor);
-        agent.checkpointReward = Mathf.Lerp(10.0f, 5.0f, progressFactor); // Start higher, then reduce
-        agent.directionAlignmentReward = Mathf.Lerp(0.1f, 0.05f, progressFactor);
-
-        // Configure car controller limits
-        if (agent.carController != null)
-        {
-            // Prevent agents from changing steering angle too quickly
-            if (agent.carController.GetType().GetField("maxSteeringAngleChange") != null)
-            {
-                agent.carController.GetType().GetField("maxSteeringAngleChange").SetValue(agent.carController, maxSteeringAngleChange);
-            }
-
-            // Ensure a minimum speed to prevent stopping
-            if (agent.carController.GetType().GetField("minSpeedThreshold") != null)
-            {
-                agent.carController.GetType().GetField("minSpeedThreshold").SetValue(agent.carController, minSpeed);
-            }
-        }
-    }
-
     private void SetLayerRecursively(GameObject obj, int layer)
     {
         obj.layer = layer;
@@ -646,6 +571,9 @@ public class TrainingManager : MonoBehaviour
 
     // SECTION: Training State Management
 
+    // Dictionary to track each agent's current episode number
+    private Dictionary<CarAgent, int> agentEpisodeCounts = new Dictionary<CarAgent, int>();
+
     // Called from Academy steps to check for rebuild conditions
     private void CountEpisodes(int academyStepCount)
     {
@@ -653,71 +581,61 @@ public class TrainingManager : MonoBehaviour
         if (currentState != TrainingState.NormalTraining)
             return;
 
+        // Update global and current episode counters
+        UpdateGlobalEpisodeCounter();
+
         // Check if it's time for a rebuild
         if (currentEpisode > 0 && currentEpisode >= episodesBeforeRebuild && currentEpisode > lastRebuildEpisode)
         {
-            if (isDebugLoggingEnabled) Debug.Log($"[TRAIN] Episode threshold reached: {currentEpisode}/{episodesBeforeRebuild} - Requesting track rebuild");
+            if (isDebugLoggingEnabled) Debug.Log($"[TRAIN] Minimum episode threshold reached: {currentEpisode}/{episodesBeforeRebuild} " +
+                                           $"(Global: {globalEpisodeCounter}) - Requesting track rebuild");
             RequestTrackRebuild();
         }
     }
 
-    // Increment the episode counter - only called after a successful reset
-    public void IncrementEpisode()
+    // Get the minimum episode count across all agents
+    private int GetMinimumEpisodeCount()
     {
-        // Only increment if we're in normal training state
+        if (agentEpisodeCounts.Count == 0)
+            return 0;
+
+        return agentEpisodeCounts.Values.Min();
+    }
+
+    // Update the global episode counter based on the current minimum episode
+    private void UpdateGlobalEpisodeCounter()
+    {
+        int minEpisodeCount = GetMinimumEpisodeCount();
+
+        // During normal training, the global counter is the last rebuild value plus the current minimum
+        globalEpisodeCounter = lastGlobalCounterBeforeRebuild + minEpisodeCount;
+
+        // Also update the current episode tracker
+        currentEpisode = minEpisodeCount;
+    }
+
+    // Report episode completion from an individual agent
+    public void ReportAgentEpisodeCompleted(CarAgent agent, int agentEpisodeCount)
+    {
+        // Only track if we're in normal training state
         if (currentState != TrainingState.NormalTraining)
             return;
 
-        currentEpisode++;
+        // Update agent's episode count
+        agentEpisodeCounts[agent] = agentEpisodeCount;
+
+        // Increment total episodes counter (individual completions)
         totalEpisodesCompleted++;
 
+        // Update the global episode counter based on minimum episode
+        UpdateGlobalEpisodeCounter();
+
         // Log progress occasionally
-        if (currentEpisode % 10 == 0 || isDebugLoggingEnabled)
+        if (totalEpisodesCompleted % 10 == 0 || isDebugLoggingEnabled)
         {
-            Debug.Log($"[TRAIN] Episode {currentEpisode}/{episodesBeforeRebuild} completed (Total: {totalEpisodesCompleted})");
-        }
-    }
-
-    // Add this method to record episode stats
-    public void RecordEpisodeCompletion(float totalReward, int checkpointsPassed)
-    {
-        float episodeLength = Time.time - previousEpisodeEndTime;
-        previousEpisodeEndTime = Time.time;
-
-        // Only store meaningful episode data
-        if (episodeLength > 1.0f)
-        {
-            episodeLengths.Add(episodeLength);
-            episodeRewards.Add(totalReward);
-
-            // Keep lists from growing too large
-            if (episodeLengths.Count > 100)
-            {
-                episodeLengths.RemoveAt(0);
-                episodeRewards.RemoveAt(0);
-            }
-        }
-
-        // Track improvement in checkpoints passed
-        int checkpointDelta = checkpointsPassed - previousEpisodeCheckpoints;
-        previousEpisodeCheckpoints = checkpointsPassed;
-
-        // Log every 10 episodes
-        if (totalEpisodesCompleted % 10 == 0)
-        {
-            // Calculate averages
-            float avgLength = 0f;
-            float avgReward = 0f;
-
-            if (episodeLengths.Count > 0)
-            {
-                avgLength = episodeLengths.Average();
-                avgReward = episodeRewards.Average();
-            }
-
-            Debug.Log($"[TRAIN STATS] Avg Duration: {avgLength:F1}s, " +
-                     $"Avg Reward: {avgReward:F1}, " +
-                     $"Checkpoints: {checkpointsPassed} ({(checkpointDelta >= 0 ? "+" : "")}{checkpointDelta})");
+            Debug.Log($"[TRAIN] Min episode across agents: {currentEpisode}/{episodesBeforeRebuild}, " +
+                      $"Agent {agent.gameObject.name}: {agentEpisodeCount}, " +
+                      $"Global: {globalEpisodeCounter} (Total: {totalEpisodesCompleted})");
         }
     }
 
@@ -734,97 +652,58 @@ public class TrainingManager : MonoBehaviour
         }
     }
 
-    // Request a regular episode reset (non-rebuild)
-    public void RequestEpisodeReset()
-    {
-        // Only allow requests in normal training state
-        if (currentState != TrainingState.NormalTraining)
-        {
-            if (isDebugLoggingEnabled) Debug.Log($"[WARN] Episode reset requested while in {currentState} state - ignoring");
-            return;
-        }
-
-        if (isDebugLoggingEnabled) Debug.Log($"[SYNC] Episode reset requested");
-
-        // Change state and reset counters
-        ChangeState(TrainingState.ResetRequested);
-        agentsReadyForReset = 0;
-
-        // Notify all agents
-        foreach (var agent in agents)
-        {
-            if (agent != null && agent.gameObject.activeSelf)
-            {
-                agent.RequestFinishForReset(false);
-            }
-        }
-    }
-
     // Request a track rebuild
     public void RequestTrackRebuild()
     {
-        // Only allow requests in normal training state
-        if (currentState != TrainingState.NormalTraining)
+        // Only allow requests in normal training state and when not already processing rebuild
+        if (currentState != TrainingState.NormalTraining || isProcessingRebuild)
         {
             if (isDebugLoggingEnabled) Debug.Log($"[WARN] Track rebuild requested while in {currentState} state - ignoring");
             return;
         }
 
-        if (isDebugLoggingEnabled) Debug.Log($"[REBUILD] Track rebuild requested at episode {currentEpisode}");
+        if (isDebugLoggingEnabled) Debug.Log($"[REBUILD] Track rebuild requested at episode {currentEpisode} (Global: {globalEpisodeCounter})");
+
+        // Before changing state, save the current global episode count
+        lastGlobalCounterBeforeRebuild = globalEpisodeCounter;
 
         // Change state and reset counters
         ChangeState(TrainingState.RebuildRequested);
-        agentsReadyForReset = 0;
+        agentsReadyForRebuild = 0;
 
         // Notify all agents
         foreach (var agent in agents)
         {
             if (agent != null && agent.gameObject.activeSelf)
             {
-                agent.RequestFinishForReset(true);
+                agent.RequestTrackRebuild();
             }
         }
     }
 
-    // Agent calls this to signal it's ready for reset
-    public void NotifyAgentReadyForReset(bool forRebuild)
+    // Agent calls this to signal it's ready for rebuild
+    public void NotifyAgentReadyForRebuild()
     {
         // Make sure we're in an appropriate state to accept notifications
-        if (currentState != TrainingState.ResetRequested && currentState != TrainingState.RebuildRequested)
+        if (currentState != TrainingState.RebuildRequested)
         {
-            Debug.LogWarning($"[WARN] Agent notified ready for reset while in {currentState} state - ignoring");
+            Debug.LogWarning($"[WARN] Agent notified ready for rebuild while in {currentState} state - ignoring");
             return;
         }
 
-        // Check for state/param mismatch
-        if ((currentState == TrainingState.ResetRequested && forRebuild) ||
-            (currentState == TrainingState.RebuildRequested && !forRebuild))
-        {
-            Debug.LogWarning($"[WARN] Agent ready parameter ({forRebuild}) doesn't match current state ({currentState})");
-        }
-
         // Increment the counter
-        agentsReadyForReset++;
+        agentsReadyForRebuild++;
 
-        if (isDebugLoggingEnabled && (agentsReadyForReset == 1 || agentsReadyForReset == totalActiveAgents))
+        if (isDebugLoggingEnabled && (agentsReadyForRebuild == 1 || agentsReadyForRebuild == totalActiveAgents))
         {
-            Debug.Log($"[SYNC] {agentsReadyForReset}/{totalActiveAgents} agents ready for {(forRebuild ? "rebuild" : "reset")}");
+            Debug.Log($"[SYNC] {agentsReadyForRebuild}/{totalActiveAgents} agents ready for rebuild");
         }
 
         // Check if all agents are ready
-        if (agentsReadyForReset >= totalActiveAgents)
+        if (agentsReadyForRebuild >= totalActiveAgents)
         {
-            if (isDebugLoggingEnabled) Debug.Log($"[SYNC] All agents ready - proceeding with {(currentState == TrainingState.RebuildRequested ? "track rebuild" : "episode reset")}");
-
-            // Start the appropriate action
-            if (currentState == TrainingState.ResetRequested)
-            {
-                StartCoroutine(PerformEpisodeReset());
-            }
-            else if (currentState == TrainingState.RebuildRequested)
-            {
-                StartCoroutine(PerformTrackRebuild());
-            }
+            if (isDebugLoggingEnabled) Debug.Log($"[SYNC] All agents ready - proceeding with track rebuild");
+            StartCoroutine(PerformTrackRebuild());
         }
     }
 
@@ -834,29 +713,6 @@ public class TrainingManager : MonoBehaviour
         return useStrictResets;
     }
 
-    // Maybe apply a random perturbation based on curriculum
-    public void MaybeApplyRandomPerturbation(CarAgent agent)
-    {
-        // Only apply in non-strict mode and based on random chance
-        if (!useStrictResets && UnityEngine.Random.value < randomPerturbationChance)
-        {
-            Rigidbody rb = agent.GetComponent<Rigidbody>();
-            if (rb != null)
-            {
-                // Random direction slightly biased toward lateral forces
-                Vector3 direction = new Vector3(
-                    UnityEngine.Random.Range(-1f, 1f),
-                    0,
-                    UnityEngine.Random.Range(-0.2f, 0.2f)
-                ).normalized;
-
-                // Apply force at agent's position
-                rb.AddForce(direction * perturbationStrength, ForceMode.Impulse);
-
-                if (isDebugLoggingEnabled) Debug.Log($"[TRAIN] Applied random perturbation to {agent.gameObject.name}");
-            }
-        }
-    }
 
     // Safely change the training state
     private void ChangeState(TrainingState newState)
@@ -868,63 +724,18 @@ public class TrainingManager : MonoBehaviour
 
     // SECTION: Training Actions Implementation
 
-    // Perform a standard episode reset
-    private IEnumerator PerformEpisodeReset()
-    {
-        // Update state 
-        ChangeState(TrainingState.ResetInProgress);
-
-        // STOP THE RACE
-        if (raceManager != null)
-        {
-            raceManager.EndRace();
-            if (isDebugLoggingEnabled) Debug.Log("[RESET] Race ended");
-        }
-
-        // Wait for physics to stabilize
-        yield return new WaitForSeconds(waitDelayBetweenEpisodes);
-
-        // Reset all agents in a staggered fashion
-        for (int i = 0; i < agents.Count; i++)
-        {
-            var agent = agents[i];
-            if (agent != null && agent.gameObject.activeSelf)
-            {
-                // Reposition the agent with optional randomization
-                RepositionAgent(agent, i, randomizeStartPositions);
-
-                // Wait every 3 agents
-                if (i % 3 == 2) yield return new WaitForFixedUpdate();
-            }
-        }
-
-        // Wait for physics to settle
-        yield return new WaitForFixedUpdate();
-        yield return new WaitForFixedUpdate();
-
-        if (raceManager != null)
-        {
-            raceManager.InitiateRaceStart();
-            if (isDebugLoggingEnabled) Debug.Log("[RESET] Race restarted");
-        }
-
-        // Trigger the reset event for all agents to respond to
-        if (isDebugLoggingEnabled) Debug.Log($"[SYNC] Triggering OnEpisodeReset event for {agents.Count} agents");
-        OnEpisodeReset?.Invoke();
-
-        // Reset counters
-        agentsReadyForReset = 0;
-
-        // Return to normal training state
-        ChangeState(TrainingState.NormalTraining);
-
-        // Increment the episode counter
-        IncrementEpisode();
-    }
-
     // Perform a track rebuild and reset
     private IEnumerator PerformTrackRebuild()
     {
+        // Thread safety to prevent multiple rebuilds happening at once
+        if (isProcessingRebuild)
+        {
+            Debug.LogWarning("Track rebuild already in progress, ignoring duplicate request");
+            yield break;
+        }
+
+        isProcessingRebuild = true;
+
         // Update state
         ChangeState(TrainingState.RebuildInProgress);
 
@@ -936,16 +747,25 @@ public class TrainingManager : MonoBehaviour
             if (isDebugLoggingEnabled) Debug.Log("[REBUILD] Race ended");
         }
 
-
         // Wait for a short delay
         yield return new WaitForSeconds(trackRebuildDelay);
+
+        // Create a list of active agents to track
+        List<CarAgent> agentsToProcess = new List<CarAgent>();
+        foreach (var agent in agents)
+        {
+            if (agent != null && agent.gameObject != null)
+            {
+                agentsToProcess.Add(agent);
+            }
+        }
 
         // Disable agents during rebuilding if configured
         if (disableAgentsDuringRebuild)
         {
-            foreach (var agent in agents)
+            foreach (var agent in agentsToProcess)
             {
-                if (agent != null && agent.gameObject != null)
+                if (agent != null)
                 {
                     agent.gameObject.SetActive(false);
                 }
@@ -988,18 +808,18 @@ public class TrainingManager : MonoBehaviour
         }
 
         // Notify agents about the track rebuild
-        if (isDebugLoggingEnabled) Debug.Log($"[REBUILD] Notifying {agents.Count} agents about track rebuild");
+        if (isDebugLoggingEnabled) Debug.Log($"[REBUILD] Notifying agents about track rebuild");
         OnTrackRebuilt?.Invoke();
 
         // Re-enable and reset all agents
         if (useStaggeredAgentReset)
         {
-            yield return StartCoroutine(StaggeredAgentReset());
+            yield return StartCoroutine(StaggeredAgentReset(agentsToProcess));
         }
         else
         {
             // Reset all agents immediately
-            foreach (var agent in agents)
+            foreach (var agent in agentsToProcess)
             {
                 if (agent != null)
                 {
@@ -1014,9 +834,22 @@ public class TrainingManager : MonoBehaviour
             }
         }
 
-        // Reset episode counter and update last rebuild episode
-        currentEpisode = 0;
-        lastRebuildEpisode = 0;
+        // Reset episode counters and tracking if configured to do so
+        if (resetEpisodesAfterRebuild)
+        {
+            currentEpisode = 0;
+            lastRebuildEpisode = 0;
+            agentEpisodeCounts.Clear();
+
+            if (isDebugLoggingEnabled) Debug.Log($"[REBUILD] Episode counters reset to 0 for all agents (Global: {globalEpisodeCounter})");
+        }
+        else
+        {
+            // If not resetting, just update the last rebuild episode
+            lastRebuildEpisode = currentEpisode;
+
+            if (isDebugLoggingEnabled) Debug.Log($"[REBUILD] Episode counters maintained at min: {currentEpisode} (Global: {globalEpisodeCounter})");
+        }
 
         if (raceManager != null)
         {
@@ -1026,128 +859,195 @@ public class TrainingManager : MonoBehaviour
 
         // Return to normal training state
         ChangeState(TrainingState.NormalTraining);
+        isProcessingRebuild = false;
 
         if (isDebugLoggingEnabled) Debug.Log("[REBUILD] Track rebuild completed successfully");
     }
 
     // Reset agents in a staggered manner to reduce per-frame load
-    private IEnumerator StaggeredAgentReset()
+    // Modify this method in TrainingManager.cs
+    private IEnumerator StaggeredAgentReset(List<CarAgent> agentsToReset)
     {
+        Debug.Log($"[REBUILD] Starting staggered reset for {agentsToReset.Count} agents");
+
         // Wait for physics to settle
         yield return new WaitForFixedUpdate();
         yield return new WaitForFixedUpdate();
 
-        // Process agents in batches
-        int batchSize = 3; // Process 3 agents per frame
+        // Process agents in smaller batches (1-2 per frame) to ensure consistent behavior
+        int batchSize = Mathf.Max(1, Mathf.Min(2, agentsToReset.Count / 20));
 
-        for (int batchStart = 0; batchStart < agents.Count; batchStart += batchSize)
+        for (int batchStart = 0; batchStart < agentsToReset.Count; batchStart += batchSize)
         {
-            int batchEnd = Mathf.Min(batchStart + batchSize, agents.Count);
+            int batchEnd = Mathf.Min(batchStart + batchSize, agentsToReset.Count);
+            Debug.Log($"[REBUILD] Resetting agents {batchStart}-{batchEnd - 1}");
 
-            // First reposition all agents in this batch
+            // Process each agent in the batch
             for (int i = batchStart; i < batchEnd; i++)
             {
-                var agent = agents[i];
+                var agent = agentsToReset[i];
                 if (agent != null)
                 {
-                    RepositionAgent(agent, i, randomizeStartPositions);
-                }
-            }
-
-            yield return new WaitForFixedUpdate();
-
-            // Then activate and reset them
-            for (int i = batchStart; i < batchEnd; i++)
-            {
-                var agent = agents[i];
-                if (agent != null)
-                {
-                    // Re-enable agent if it was disabled
+                    // First step: Re-enable gameObject if needed
                     if (disableAgentsDuringRebuild && !agent.gameObject.activeSelf)
                     {
                         agent.gameObject.SetActive(true);
+                        Debug.Log($"[REBUILD] Re-enabled agent {i}");
+                        // Wait a frame after enabling to let Unity initialize components
+                        yield return null;
                     }
 
-                    agent.ResetForNewTrack();
+                    // Second step: Make sure critical flags are properly reset
+                    ResetAgentFlags(agent, i);
+
+                    // Third step: Reset the agent's game logic
+                    ResetAgentLogic(agent, i);
+
+                    // Fourth step: Ensure the Rigidbody is properly set
+                    ResetAgentPhysics(agent, i);
+
+                    // Fifth step: Make sure the car controller is enabled
+                    ResetAgentCarController(agent, i);
+
+                    // Sixth step: End the episode
+                    yield return null; // Wait a frame before ending episode
                     agent.EndEpisode();
+                    Debug.Log($"[REBUILD] EndEpisode called for agent {i}");
                 }
             }
 
+            // Wait for this batch to finish processing
             yield return new WaitForFixedUpdate();
+            yield return null; // Additional frame wait to ensure stability
         }
 
         // Final wait to ensure all physics is settled
         yield return new WaitForFixedUpdate();
+        Debug.Log("[REBUILD] Staggered agent reset completed for all agents");
+    }
+
+    // Helper methods to handle the try-catch blocks outside of yield statements
+    private void ResetAgentFlags(CarAgent agent, int index)
+    {
+        try
+        {
+            var agentField = agent.GetType().GetField("isReadyForRebuild",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic);
+
+            if (agentField != null)
+            {
+                agentField.SetValue(agent, false);
+                Debug.Log($"[REBUILD] Force reset isReadyForRebuild flag for agent {index}");
+            }
+
+            var waitingField = agent.GetType().GetField("isWaitingForTrackRebuild",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic);
+
+            if (waitingField != null)
+            {
+                waitingField.SetValue(agent, false);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error resetting flags for agent {index}: {e.Message}\n{e.StackTrace}");
+        }
+    }
+
+    private void ResetAgentLogic(CarAgent agent, int index)
+    {
+        try
+        {
+            agent.ResetForNewTrack();
+            Debug.Log($"[REBUILD] ResetForNewTrack completed for agent {index}");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error in ResetForNewTrack for agent {index}: {e.Message}\n{e.StackTrace}");
+        }
+    }
+
+    private void ResetAgentPhysics(CarAgent agent, int index)
+    {
+        try
+        {
+            Rigidbody rb = agent.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.isKinematic = false;
+                // Apply a small force to "wake up" the physics body
+                rb.AddForce(Vector3.up * 0.1f, ForceMode.Impulse);
+                Debug.Log($"[REBUILD] Reset physics for agent {index}");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error resetting physics for agent {index}: {e.Message}");
+        }
+    }
+
+    private void ResetAgentCarController(CarAgent agent, int index)
+    {
+        try
+        {
+            CarControlScript carController = agent.GetComponent<CarControlScript>();
+            if (carController != null)
+            {
+                carController.enabled = true;
+                carController.ResetPosition();
+                Debug.Log($"[REBUILD] Reset position for agent {index}, rotation: {agent.transform.rotation.eulerAngles}");
+            }
+            else
+            {
+                Debug.LogError($"CarControlScript not found on agent {index}");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error resetting car controller for agent {index}: {e.Message}");
+
+            // Even if an exception occurs, attempt to restore critical components
+            try
+            {
+                CarControlScript carController = agent.GetComponent<CarControlScript>();
+                if (carController != null) carController.enabled = true;
+            }
+            catch { }
+        }
     }
 
     // Reposition a single agent at the start position with offset
+    // In TrainingManager.cs, modify RepositionAgent:
     private void RepositionAgent(CarAgent agent, int index, bool randomize = false)
     {
         if (agent == null || agent.transform == null)
             return;
 
-        try
+        // Get the car controller component
+        CarControlScript carController = agent.GetComponent<CarControlScript>();
+
+        if (carController != null)
         {
-            // Get start position from track handler
-            (Vector3 startPosition1, Vector3 startPosition2, Quaternion startRotation) = trackHandler.GetTrackStartTransform();
+            // Just use the car controller's reset method - this is much simpler
+            carController.ResetPosition();
 
-            // Calculate position with offset to prevent overlap
-            Vector3 spawnPosition = startPosition1 + Vector3.right * (index % 3) * agentSpacing + Vector3.forward * (index / 3) * agentSpacing;
+            if (isDebugLoggingEnabled)
+                Debug.Log($"[REPOSITION] Agent {agent.gameObject.name} reset using car controller to rotation {agent.transform.rotation.eulerAngles}");
 
-            // Add randomization if enabled
-            if (randomize)
+            // Optional: Apply additional randomization if needed
+            if (randomize && startPositionRandomization > 0)
             {
-                // Add small random offset to position
-                spawnPosition += new Vector3(
-                    UnityEngine.Random.Range(-startPositionRandomization, startPositionRandomization),
-                    0,
-                    UnityEngine.Random.Range(-startPositionRandomization, startPositionRandomization));
-
-                // Add small random rotation
-                startRotation *= Quaternion.Euler(0, UnityEngine.Random.Range(-5f, 5f), 0);
-            }
-
-            // Reset physics state completely
-            Rigidbody rb = agent.GetComponent<Rigidbody>();
-            if (rb != null)
-            {
-                // First make kinematic to reliably reposition
-                rb.isKinematic = true;
-
-                // Update transform
-                agent.transform.position = spawnPosition;
-                agent.transform.rotation = startRotation;
-
-                // Now reset physics state
-                rb.isKinematic = false;
-                rb.linearVelocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
-                rb.ResetInertiaTensor();
-
-                // Put rigidbody to sleep for stability
-                rb.Sleep();
-            }
-            else
-            {
-                // No rigidbody, just set transform
-                agent.transform.position = spawnPosition;
-                agent.transform.rotation = startRotation;
-            }
-
-            // Reset car controller if possible
-            CarControlScript carController = agent.GetComponent<CarControlScript>();
-            if (carController != null)
-            {
-                var resetMethod = carController.GetType().GetMethod("ResetVehicle");
-                if (resetMethod != null)
-                {
-                    resetMethod.Invoke(carController, null);
-                }
+                // Wait a frame for the reset to fully apply
+                //TODO: This may not be necessary
             }
         }
-        catch (Exception e)
+        else
         {
-            Debug.LogError($"Error repositioning agent {index}: {e.Message}");
+            Debug.LogError($"Cannot reposition agent {agent.gameObject.name}: CarControlScript not found");
         }
     }
 

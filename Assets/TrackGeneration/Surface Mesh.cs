@@ -18,6 +18,7 @@ namespace Assets.TrackGeneration
         {
             GameObject surfaceObject = new GameObject("TrackSurface");
             surfaceObject.tag = "Floor";
+            surfaceObject.layer = 2;
 
             MeshFilter meshFilter = surfaceObject.AddComponent<MeshFilter>();
             MeshRenderer meshRenderer = surfaceObject.AddComponent<MeshRenderer>();

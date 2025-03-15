@@ -16,8 +16,6 @@ public class CarSpawner : MonoBehaviour
     [Header("AI Setup")]
     public ModelAsset onnxModel; // Reference to your trained ML-Agents model (.onnx file)
     public bool spawnAI = false;
-    [Tooltip("Set this to the same number of rays as used during training")]
-    public int aiRayCount = 9;
     [Tooltip("Set this to the same ray angle as used during training")]
     public float aiRayAngle = 180f;
     [Tooltip("Set this to the same sensor length as used during training")]
@@ -210,19 +208,20 @@ public class CarSpawner : MonoBehaviour
             TrackSensingSystem sensorSystem = carObject.GetComponent<TrackSensingSystem>();
             if (sensorSystem == null)
             {
+                Transform carBodyTransform = carObject.transform.Find("CarBody");
                 sensorSystem = carObject.AddComponent<TrackSensingSystem>();
-                sensorSystem.raycastOrigin = carObject.transform;
-                sensorSystem.rayCount = aiRayCount;
-                sensorSystem.rayAngle = aiRayAngle;
-                sensorSystem.sensorLength = aiSensorLength;
+                sensorSystem.raycastOrigin = carBodyTransform;
+                //sensorSystem.rayCount = aiRayCount;
+                //sensorSystem.rayAngle = aiRayAngle;
+                //sensorSystem.sensorLength = aiSensorLength;
                 sensorSystem.visualizeRays = false;
             }
             else
             {
                 sensorSystem.raycastOrigin = carObject.transform;
-                sensorSystem.rayCount = aiRayCount;
-                sensorSystem.rayAngle = aiRayAngle;
-                sensorSystem.sensorLength = aiSensorLength;
+                //sensorSystem.rayCount = aiRayCount;
+                //sensorSystem.rayAngle = aiRayAngle;
+                //sensorSystem.sensorLength = aiSensorLength;
                 sensorSystem.visualizeRays = false;
             }
 
@@ -249,7 +248,7 @@ public class CarSpawner : MonoBehaviour
             }
 
             // Setup for observation and action spaces
-            int totalObservations = sensorSystem.rayCount + 5; // rays + other values
+            int totalObservations = 40; // rays + other values
 
             // IMPORTANT: Set model before behavior type
             if (onnxModel != null)

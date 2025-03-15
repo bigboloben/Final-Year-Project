@@ -7,9 +7,16 @@ namespace Assets.TrackGeneration
     {
         private RaceManager raceManager;
 
+        // Layer name for checkpoints
+        public const string CheckpointLayerName = "Ignore Raycast";
+        public const int CheckpointLayer = 2;
+
         public void Initialize(RaceManager manager)
         {
             this.raceManager = manager;
+
+            // Set this object to the Checkpoint layer
+            gameObject.layer = CheckpointLayer;
         }
 
         private void OnTriggerEnter(Collider other)
@@ -58,9 +65,15 @@ namespace Assets.TrackGeneration
                 numberOfCheckpoints = leftPoints.Length;
             }
 
+            // Create Checkpoint layer if it doesn't exist
+            CreateCheckpointLayerIfNeeded();
+
             List<Checkpoint> checkpoints = new List<Checkpoint>();
             GameObject checkpointsContainer = new GameObject("Checkpoints");
             checkpointsContainer.transform.SetParent(trackObject.transform);
+
+            // Set the container to the Checkpoint layer as well
+            checkpointsContainer.layer = Checkpoint.CheckpointLayer;
 
             float increment = (float)(leftPoints.Length - 1) / (numberOfCheckpoints - 1);
 
@@ -73,6 +86,9 @@ namespace Assets.TrackGeneration
 
                 GameObject checkpointObject = CreateCheckpointTrigger(leftPoint, rightPoint, checkpointHeight);
                 checkpointObject.transform.SetParent(checkpointsContainer.transform);
+
+                // Set the checkpoint to the Checkpoint layer
+                checkpointObject.layer = Checkpoint.CheckpointLayer;
 
                 Checkpoint checkpoint = checkpointObject.AddComponent<Checkpoint>();
                 checkpoints.Add(checkpoint);
@@ -106,7 +122,21 @@ namespace Assets.TrackGeneration
             checkpoint.transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
             checkpoint.transform.right = direction;
 
+            // Set the checkpoint to the Checkpoint layer
+            checkpoint.layer = Checkpoint.CheckpointLayer;
+
             return checkpoint;
+        }
+
+        private static void CreateCheckpointLayerIfNeeded()
+        {
+            // This should be called from Editor script ideally, but we'll add a runtime check
+            // Note: This doesn't actually create the layer at runtime, just logs a warning if it doesn't exist
+            if (LayerMask.NameToLayer(Checkpoint.CheckpointLayerName) == -1)
+            {
+                Debug.LogWarning($"Checkpoint layer '{Checkpoint.CheckpointLayerName}' doesn't exist. Please create it in Project Settings > Tags and Layers.");
+                Debug.LogWarning($"Setup layer #{Checkpoint.CheckpointLayer} as '{Checkpoint.CheckpointLayerName}' in your project settings.");
+            }
         }
     }
 }

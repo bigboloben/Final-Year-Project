@@ -255,7 +255,6 @@ namespace Assets.TrackGeneration
                     carSpawner.spawnAI = enableAICars;
 
                     // Configure AI matching training setup
-                    carSpawner.aiRayCount = aiRayCount;
                     carSpawner.aiRayAngle = aiRayAngle;
                     carSpawner.aiSensorLength = aiSensorLength;
                     carSpawner.aiLayerName = aiLayerName;

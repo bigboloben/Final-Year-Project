@@ -26,9 +26,9 @@ namespace Assets.TrackGeneration
         private List<Cycle> cycles;
         private Cycle cycle;
         private VoronoiDiagram voronoi;
-        private SplineContainer trackSpline;
-        private SplineContainer rightSpline;
-        private SplineContainer leftSpline;
+        public SplineContainer trackSpline;
+        public SplineContainer rightSpline;
+        public SplineContainer leftSpline;
         private GameObject splineObject;
         private GameObject rightSplineObject;
         private GameObject leftSplineObject;

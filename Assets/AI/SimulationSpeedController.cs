@@ -131,7 +131,7 @@ public class SimulationSpeedController : MonoBehaviour
                 if (agent != null)
                 {
                     agent.enableRewardLogging = isRewardLoggingEnabled;
-                    agent.enableResetReasonLogging = isResetLoggingEnabled;
+                    //agent.enableResetReasonLogging = isResetLoggingEnabled;
                     agent.visualizeTargetDirection = isResetLoggingEnabled;
                 }
             }

@@ -24,39 +24,45 @@ public class CarAgent : Agent
     private Vector3 directionToNextCheckpoint;
     private float lastCheckpointTime;
     private int totalCheckpointsPassed = 0;
-    // Use an integer array for better performance than HashSet
-    private readonly int[] visitedCheckpoints = new int[100]; // 100 is more than enough
-    private int visitedCheckpointCount = 0;
+    private int currentLap = 0;
 
     [Header("Checkpoint Debugging")]
-    public bool enableCheckpointDebugging = true;
+    public bool enableCheckpointDebugging = false;
     private bool lastRaceActiveState = false;
+
+    [Header("Track Memory")]
+    public bool useTrackMemory = true;
+    private Vector3[] trackKnots;     // Center track knots
+    private Vector3[] leftWallKnots;  // Left wall knots 
+    private Vector3[] rightWallKnots; // Right wall knots
+    private bool[] discoveredKnots;   // Which knots we've seen
+    private int closestKnotIndex = 0;
+    private int lookAheadCount = 2;   // How many points to predict ahead
+    public float trackMemoryUpdateInterval = 0.2f; // Update 5 times per second instead of every frame
+    private float lastTrackMemoryUpdateTime = 0f;
+    private int cachedClosestKnotIndex = -1;
 
     [Header("Reward Parameters")]
     [Tooltip("Reward for passing a checkpoint")]
-    public float checkpointReward = 5.0f;
+    public float checkpointReward = 2.0f;
     [Tooltip("Base reward for completing a lap")]
     public float lapCompletionReward = 5.0f;
     [Tooltip("Penalty for hitting walls")]
-    public float collisionPenalty = -0.1f;
+    public float collisionPenalty = -1.0f; // Increased from -0.1f
     [Tooltip("Small reward for maintaining speed")]
     public float speedReward = 0.05f;
     [Tooltip("Penalty for going backwards")]
-    public float backwardsPenalty = -0.1f;
+    public float backwardsPenalty = -0.5f; // Increased from -0.1f
     [Tooltip("Penalty for not making progress")]
-    public float noProgressPenalty = -0.01f;
+    public float noProgressPenalty = -0.05f; // Increased from -0.01f
     [Tooltip("Penalty for jerky steering")]
-    public float jerkySteeringPenalty = -0.005f;
+    public float jerkySteeringPenalty = -0.01f; // Slightly increased
     [Tooltip("Reward for facing the right direction")]
-    public float directionAlignmentReward = 0.05f;
+    public float directionAlignmentReward = 0.1f; // Increased from 0.05f
     [Tooltip("Penalty for using reverse")]
     public float reversePenalty = -0.3f;
     [Tooltip("Bonus reward for efficient lap completion")]
     public float lapTimeBonus = 3.0f;
-    [Tooltip("Reward for skillful cornering techniques (drifting, handbrake turns)")]
-    public float corneringReward = 0.15f;
-    [Tooltip("Reward for recovering from difficult situations")]
-    public float recoveryReward = 0.5f;
 
     [Header("Training Parameters")]
     [Tooltip("Seconds before reset if no checkpoint is passed")]
@@ -78,12 +84,22 @@ public class CarAgent : Agent
     [Tooltip("Visualize direction to next checkpoint")]
     public bool visualizeTargetDirection = true;
     [Tooltip("Show debug messages")]
-    public bool isDebugLoggingEnabled = true;
+    public bool isDebugLoggingEnabled = false;
 
     [Header("Debug Enhancement")]
-    public bool enableRewardLogging = true;
-    public bool enableResetReasonLogging = true;
+    public bool enableRewardLogging = false;
+    public bool enableResetReasonLogging = false;
     private string lastResetReason = "None";
+
+    [Header("Visualization")]
+    public bool visualizeRaySensors = false;
+    public bool visualizeActionIntentions = false;
+    public Color raySensorHitColor = Color.red;
+    public Color raySensorNoHitColor = Color.green;
+    public float visualizationDuration = 0.1f;
+
+    // Episode tracking
+    private int agentEpisodeCount = 0;
 
     // Reward tracking
     private Dictionary<string, float> rewardComponents = new Dictionary<string, float>();
@@ -129,17 +145,32 @@ public class CarAgent : Agent
     private float positionCheckFrequency = 0.2f;
     private float lastPositionHistoryTime = 0f;
 
-    // Reset coordination
-    private bool resetRequested = false;
-    private bool isReadyForReset = false;
-    private float resetRequestTime = 0f;
-    private float maxTimeToFinishAfterResetRequest = 10f;
-    private bool isForcedReset = false;
-    private float safetyResetHeight = -10f; // Height at which to force reset if car falls
-    private bool isTrackRebuildPending = false;
+    // Track rebuild coordination
+    private bool isWaitingForTrackRebuild = false;
+    private bool isReadyForRebuild = false;
+    private float rebuilRequestTime = 0f;
+    private float maxTimeToFinishBeforeRebuild = 10f;
+    private float safetyResetHeight = -50f; // Height at which to force reset if car falls
 
     // Race debug timer
     private float lastRaceDebugTime = 0f;
+
+    // Memory for observations
+    private Vector3 previousPosition;
+    private Vector3 previousForward;
+    private float[] previousRaySensorData = new float[0]; // Will initialize properly in Start
+
+    // For visualization
+    private float[] latestContinuousActions = new float[0];
+    private int[] latestDiscreteActions = new int[0];
+
+    // Action interpolation system
+    private float[] previousActions = new float[3]; // [accelerate, steer, brake]
+    private float[] currentActions = new float[3];
+    private bool previousHandbrake = false;
+    private bool currentHandbrake = false;
+    private float interpolationTime = 0f;
+    private float decisionInterval = 0.1f; // Will be updated dynamically
 
     public override void Initialize()
     {
@@ -154,9 +185,6 @@ public class CarAgent : Agent
 
             // Subscribe to track rebuild events
             trainingManager.OnTrackRebuilt += OnTrackRebuilt;
-
-            // Subscribe to episode reset events
-            trainingManager.OnEpisodeReset += OnEpisodeReset;
 
             if (isDebugLoggingEnabled) Debug.Log($"Car {gameObject.name} successfully initialized with TrainingManager references");
         }
@@ -213,9 +241,70 @@ public class CarAgent : Agent
             // Subscribe to checkpoint events
             raceManager.OnCheckpointPassed += OnRaceManagerCheckpointPassed;
         }
+
+        // Initialize memory variables
+        previousPosition = transform.position;
+        previousForward = transform.forward;
+
+        // Initialize ray history with proper size when sensor system is available
+        if (sensorSystem != null)
+        {
+            float[] currentData = sensorSystem.GetAllSensorData();
+            previousRaySensorData = new float[currentData.Length];
+            System.Array.Copy(currentData, previousRaySensorData, currentData.Length);
+        }
+
+        // Initialize action arrays for interpolation
+        for (int i = 0; i < 3; i++)
+        {
+            previousActions[i] = 0f;
+            currentActions[i] = 0f;
+        }
+
+        // Get initial decision interval
+        var decisionRequester = GetComponent<Unity.MLAgents.DecisionRequester>();
+        if (decisionRequester != null)
+        {
+            decisionInterval = Time.fixedDeltaTime * decisionRequester.DecisionPeriod;
+        }
+        InitializeTrackMemory();
     }
 
-    void Awake()
+    private void InitializeTrackMemory()
+    {
+        if (!useTrackMemory || trackHandler == null) return;
+
+        // Get the spline containers
+        var centerSpline = trackHandler.trackSpline;
+        var leftSpline = trackHandler.leftSpline;
+        var rightSpline = trackHandler.rightSpline;
+
+        if (centerSpline == null || leftSpline == null || rightSpline == null)
+        {
+            Debug.LogWarning("Could not find track splines for sampling");
+            return;
+        }
+
+        // Get knot count (they should all have the same count)
+        int knotCount = centerSpline.Spline.Count;
+        trackKnots = new Vector3[knotCount];
+        leftWallKnots = new Vector3[knotCount];
+        rightWallKnots = new Vector3[knotCount];
+        discoveredKnots = new bool[knotCount];
+
+        // Extract the knot positions from each spline
+        for (int i = 0; i < knotCount; i++)
+        {
+            trackKnots[i] = centerSpline.Spline[i].Position;
+            leftWallKnots[i] = leftSpline.Spline[i].Position;
+            rightWallKnots[i] = rightSpline.Spline[i].Position;
+            discoveredKnots[i] = false; // Start undiscovered
+        }
+
+        Debug.Log($"Track memory initialized with {knotCount} knot points");
+    }
+
+    protected override void Awake()
     {
         base.Awake();
 
@@ -223,11 +312,11 @@ public class CarAgent : Agent
         var behaviorParams = GetComponent<Unity.MLAgents.Policies.BehaviorParameters>();
         if (behaviorParams != null)
         {
-            // Force the correct observation size
-            int expectedObservations = 14; // 9 rays + 5 other values
-
+            
+            int expectedObservations = 40;
             if (behaviorParams.BrainParameters.VectorObservationSize != expectedObservations)
             {
+                Debug.Log($"Updating vector observation size from {behaviorParams.BrainParameters.VectorObservationSize} to {expectedObservations}");
                 behaviorParams.BrainParameters.VectorObservationSize = expectedObservations;
             }
 
@@ -275,10 +364,35 @@ public class CarAgent : Agent
                 }
                 lastRaceDebugTime = Time.time;
             }
+            if (isReadyForRebuild)
+            {
+                float stuckTime = Time.time - rebuilRequestTime;
+                // If stuck for more than 30 seconds, force reset
+                if (stuckTime > 30f)
+                {
+                    Debug.LogWarning($"[SAFETY] Car {gameObject.name} stuck in rebuild state for {stuckTime:F1}s - forcing reset");
+
+                    // Reset critical flags
+                    isReadyForRebuild = false;
+                    isWaitingForTrackRebuild = false;
+
+                    // Re-enable required components
+                    if (carController != null)
+                        carController.enabled = true;
+
+                    Rigidbody rb = GetComponent<Rigidbody>();
+                    if (rb != null)
+                        rb.isKinematic = false;
+
+                    // Reset car
+                    ResetCar();
+                    EndEpisode();
+                }
+            }
         }
 
         // Add this new block for more detailed progress tracking
-        if (!resetRequested && Time.frameCount % 120 == 0) // Log every 120 frames
+        if (Time.frameCount % 120 == 0) // Log every 120 frames
         {
             float progressSpeed = carController.GetCurrentSpeed();
             float distToCheckpoint = distanceToNextCheckpoint;
@@ -301,25 +415,24 @@ public class CarAgent : Agent
             if (enableResetReasonLogging)
                 Debug.LogWarning($"[RESET] Car {gameObject.name} fell below safety height ({safetyResetHeight}). Forcing reset.");
             lastResetReason = "Fell below safety height";
-            isForcedReset = true;
-            NotifyReadyForReset();
+            ResetCar();
+            EndEpisode();
             return;
         }
 
-        // Check if we need to force finish due to reset request timeout
-        if (resetRequested && !isReadyForReset)
+        // Check if we need to force rebuild due to timeout
+        if (isWaitingForTrackRebuild && !isReadyForRebuild)
         {
-            float timeSinceRequest = Time.time - resetRequestTime;
-            if (timeSinceRequest > maxTimeToFinishAfterResetRequest)
+            float timeSinceRequest = Time.time - rebuilRequestTime;
+            if (timeSinceRequest > maxTimeToFinishBeforeRebuild)
             {
-                if (isDebugLoggingEnabled) Debug.Log($"Car {gameObject.name} forcing finish due to reset request timeout");
-                isForcedReset = true;
-                NotifyReadyForReset();
+                if (isDebugLoggingEnabled) Debug.Log($"Car {gameObject.name} forcing finish due to rebuild request timeout");
+                NotifyReadyForRebuild();
             }
         }
 
-        // Check for backwards movement at intervals - only do this if we're not in reset mode
-        if (!resetRequested && Time.time - lastPositionCheckTime > positionCheckInterval)
+        // Check for backwards movement at intervals
+        if (Time.time - lastPositionCheckTime > positionCheckInterval)
         {
             CheckMovementDirection();
             lastPositionCheckTime = Time.time;
@@ -332,27 +445,314 @@ public class CarAgent : Agent
             lastPositionHistoryTime = Time.time;
         }
 
-        // Check for recovery progress
-        if (isRecovering && Time.time - recoveryStartTime > recoveryCheckTime)
-        {
-            CheckRecoveryProgress();
-        }
-
-        // Apply random perturbation based on curriculum (when not in reset mode)
-        if (!resetRequested && trainingManager != null)
-        {
-            // Only apply this in "recovery learning" phase
-            if (!trainingManager.IsUsingStrictResets())
-            {
-                trainingManager.MaybeApplyRandomPerturbation(this);
-            }
-        }
 
         // Log rewards periodically
         if (Time.time > lastLoggedRewardTime + rewardLoggingInterval && enableRewardLogging)
         {
             LogRewardSummary();
             lastLoggedRewardTime = Time.time;
+        }
+
+        // Visualize agent perception
+        VisualizeAgentPerception();
+    }
+
+    // Action interpolation in FixedUpdate
+    void FixedUpdate()
+    {
+        // Skip if waiting for rebuild or if car controller is null
+        if (isReadyForRebuild || carController == null)
+            return;
+
+        // Update interpolation time
+        interpolationTime += Time.fixedDeltaTime;
+
+        // Update decision interval dynamically if needed
+        if (decisionInterval <= 0.001f)
+        {
+            var decisionRequester = GetComponent<Unity.MLAgents.DecisionRequester>();
+            if (decisionRequester != null)
+            {
+                decisionInterval = Time.fixedDeltaTime * decisionRequester.DecisionPeriod;
+            }
+            else
+            {
+                decisionInterval = 0.1f; // Fallback
+            }
+        }
+
+        // Calculate interpolation factor (0 to 1)
+        float t = Mathf.Clamp01(interpolationTime / decisionInterval);
+
+        // Interpolate actions
+        float interpolatedAccelerate = Mathf.Lerp(previousActions[0], currentActions[0], t);
+        float interpolatedSteer = Mathf.Lerp(previousActions[1], currentActions[1], t);
+        float interpolatedBrake = Mathf.Lerp(previousActions[2], currentActions[2], t);
+
+        // For handbrake (binary action), use threshold
+        bool useHandbrake = t > 0.5f ? currentHandbrake : previousHandbrake;
+
+        // Apply interpolated inputs to car controller
+        SetCarInputs(interpolatedAccelerate, interpolatedSteer, interpolatedBrake, useHandbrake);
+
+        // Update track memory at intervals rather than every frame
+        if (Time.time - lastTrackMemoryUpdateTime > trackMemoryUpdateInterval)
+        {
+            UpdateTrackMemory();
+            lastTrackMemoryUpdateTime = Time.time;
+        }
+    }
+
+    private void UpdateTrackMemory()
+    {
+        if (!useTrackMemory || trackKnots == null) return;
+
+        // Find closest track knot
+        closestKnotIndex = FindClosestKnot();
+
+        // Mark several knots around the current position as discovered
+        if (closestKnotIndex >= 0)
+        {
+            int range = 10; // Mark 10 knots in each direction
+            for (int offset = -range; offset <= range; offset++)
+            {
+                int idx = (closestKnotIndex + offset + trackKnots.Length) % trackKnots.Length;
+                discoveredKnots[idx] = true;
+            }
+        }
+    }
+
+
+
+
+    // Optimize FindClosestKnot to avoid checking every knot every time
+    private int FindClosestKnot()
+    {
+        if (trackKnots == null) return -1;
+
+        // If we already have a closest knot, only check nearby knots first
+        if (cachedClosestKnotIndex >= 0)
+        {
+            float minDist = float.MaxValue;
+            int closestIndex = cachedClosestKnotIndex;
+            int knotCount = trackKnots.Length;
+
+            // Check 10 knots ahead and behind current knot
+            int searchRange = 10;
+            for (int offset = -searchRange; offset <= searchRange; offset++)
+            {
+                int i = (cachedClosestKnotIndex + offset + knotCount) % knotCount;
+                float dist = Vector3.Distance(transform.position, trackKnots[i]);
+                if (dist < minDist)
+                {
+                    minDist = dist;
+                    closestIndex = i;
+                }
+            }
+
+            // If we found a knot significantly closer or haven't checked all knots in a while,
+            // perform a full search (every ~2 seconds)
+            if (minDist < 5f || Time.frameCount % 120 == 0)
+                return closestIndex;
+
+            // Full search if we didn't find a good match
+            return FindAllKnots();
+        }
+
+        // Fall back to checking all knots if we don't have a cached value
+        return FindAllKnots();
+    }
+
+    private int FindAllKnots()
+    {
+        float minDist = float.MaxValue;
+        int closestIndex = -1;
+
+        for (int i = 0; i < trackKnots.Length; i++)
+        {
+            float dist = Vector3.Distance(transform.position, trackKnots[i]);
+            if (dist < minDist)
+            {
+                minDist = dist;
+                closestIndex = i;
+            }
+        }
+
+        // Cache result for next time
+        cachedClosestKnotIndex = closestIndex;
+        return closestIndex;
+    }
+
+    // Add to your visualization method
+    private void VisualizeTrackKnots()
+    {
+        if (!useTrackMemory || !visualizeRaySensors || trackKnots == null) return;
+
+        int knotCount = trackKnots.Length;
+
+        // Draw lines between knots we've discovered
+        for (int i = 0; i < knotCount; i++)
+        {
+            if (discoveredKnots[i])
+            {
+                int nextIndex = (i + 1) % knotCount;
+                if (discoveredKnots[nextIndex])
+                {
+                    // Draw center line
+                    Debug.DrawLine(trackKnots[i], trackKnots[nextIndex], Color.yellow, 0.1f);
+
+                    // Draw wall lines
+                    Debug.DrawLine(leftWallKnots[i], leftWallKnots[nextIndex], Color.cyan, 0.1f);
+                    Debug.DrawLine(rightWallKnots[i], rightWallKnots[nextIndex], Color.cyan, 0.1f);
+
+                    // Draw track width
+                    Debug.DrawLine(leftWallKnots[i], rightWallKnots[i], Color.white, 0.1f);
+                }
+            }
+        }
+
+        // Highlight the closest knot
+        if (closestKnotIndex >= 0)
+        {
+            // Draw a strong red line from car to closest knot
+            Debug.DrawLine(transform.position, trackKnots[closestKnotIndex], Color.red, 0.1f);
+
+            // Draw a sphere at the closest knot position
+            Debug.DrawLine(trackKnots[closestKnotIndex], trackKnots[closestKnotIndex] + Vector3.up * 2f, Color.red, 0.1f);
+
+            // Highlight the look-ahead knots (these are exactly the knots used as observations)
+            for (int i = 1; i <= lookAheadCount; i++)
+            {
+                int knotIndex = (closestKnotIndex + i) % knotCount;
+                if (discoveredKnots[knotIndex])
+                {
+                    // Color gradient from green to blue for observation knots
+                    Color observationColor = Color.Lerp(Color.green, Color.blue, i / (float)lookAheadCount);
+
+                    // Draw a direct line from car to observation knot (these are the knots used in observations)
+                    Debug.DrawLine(
+                        transform.position,
+                        trackKnots[knotIndex],
+                        observationColor,
+                        0.1f
+                    );
+
+                    // Draw a vertical marker at each observation knot
+                    Debug.DrawLine(
+                        trackKnots[knotIndex],
+                        trackKnots[knotIndex] + Vector3.up * (3f - i * 0.5f), // Vary height based on look ahead index
+                        observationColor,
+                        0.1f
+                    );
+
+                    // Get track data for the knot
+                    Vector3 center = trackKnots[knotIndex];
+                    Vector3 leftPos = leftWallKnots[knotIndex];
+                    Vector3 rightPos = rightWallKnots[knotIndex];
+
+                    // Calculate track width and height difference
+                    float width = Vector3.Distance(leftPos, rightPos);
+                    float heightDiff = rightPos.y - leftPos.y;
+                    float bankAngle = Mathf.Atan2(heightDiff, width) * Mathf.Rad2Deg;
+
+                    // Draw track width at this observation knot
+                    Debug.DrawLine(leftPos, rightPos, observationColor, 0.1f);
+
+                    // Visualize the banking angle
+                    Vector3 bankingDirection = Quaternion.Euler(0, 0, bankAngle) * Vector3.up * 3f;
+                    Debug.DrawRay(center, bankingDirection, Color.magenta, 0.1f);
+
+                    // Calculate track direction to next knot
+                    int nextIndex = (knotIndex + 1) % knotCount;
+                    if (discoveredKnots[nextIndex])
+                    {
+                        Vector3 nextPos = trackKnots[nextIndex];
+                        Vector3 trackDirection = (nextPos - center).normalized * 5f;
+                        Debug.DrawRay(center, trackDirection, observationColor, 0.1f);
+                    }
+
+                    // Annotate with info about what's being observed at this knot
+                    Vector3 localCenter = transform.InverseTransformPoint(center);
+                    float distance = Vector3.Distance(transform.position, center);
+
+                    // Show important values being observed by drawing different size markers
+                    // based on these values (to visually indicate what the agent sees)
+                    float observationScale = 0.5f + (lookAheadCount - i) * 0.3f; // Closer observations are larger
+                    float distanceScale = Mathf.Clamp01(1.0f - (distance / 100f)) * 2f; // Closer knots get larger markers
+                    float finalScale = observationScale * distanceScale;
+
+                    // Draw a cross marker sized according to distance and observation importance
+                    Vector3 crossSize = new Vector3(finalScale, finalScale, finalScale);
+                    Debug.DrawRay(center, Vector3.right * crossSize.x, observationColor, 0.1f);
+                    Debug.DrawRay(center, Vector3.left * crossSize.x, observationColor, 0.1f);
+                    Debug.DrawRay(center, Vector3.forward * crossSize.z, observationColor, 0.1f);
+                    Debug.DrawRay(center, Vector3.back * crossSize.z, observationColor, 0.1f);
+                }
+            }
+        }
+    }
+
+    // Visualize ray sensors and agent intentions
+    private void VisualizeAgentPerception()
+    {
+        if (!visualizeRaySensors && !visualizeActionIntentions)
+            return;
+
+        // Visualize ray sensors
+        if (visualizeRaySensors && sensorSystem != null)
+        {
+            VisualizeTrackKnots();
+            Vector3[] rayOrigins = sensorSystem.GetRayOrigins();
+            Vector3[] rayDirections = sensorSystem.GetRayDirections();
+            float[] rayDistances = sensorSystem.GetAllSensorData();
+
+            for (int i = 0; i < rayOrigins.Length && i < rayDirections.Length && i < rayDistances.Length; i++)
+            {
+                // Get actual ray hit distance (if available)
+                float maxRayDistance = sensorSystem.GetMaxRayDistance();
+                float hitDistance = rayDistances[i] * maxRayDistance;
+
+                // Draw the ray - red for hits, green for no hits
+                bool hitDetected = rayDistances[i] < 0.99f; // Not at max range
+                Color rayColor = hitDetected ? raySensorHitColor : raySensorNoHitColor;
+
+                // Draw the ray up to hit point or full length
+                Vector3 endPoint = rayOrigins[i] + rayDirections[i] * hitDistance;
+                Debug.DrawLine(rayOrigins[i], endPoint, rayColor, visualizationDuration);
+
+                // Draw a small sphere at the hit point if there was a hit
+                if (hitDetected)
+                {
+                    Debug.DrawLine(endPoint, endPoint + Vector3.up * 0.5f, Color.yellow, visualizationDuration);
+                }
+            }
+        }
+
+        // Visualize agent action intentions
+        if (visualizeActionIntentions)
+        {
+            // Get the most recent action values
+            float accelerate = latestContinuousActions.Length > 0 ? latestContinuousActions[0] : 0f;
+            float steer = latestContinuousActions.Length > 1 ? latestContinuousActions[1] : 0f;
+            float brake = latestContinuousActions.Length > 2 ? latestContinuousActions[2] : 0f;
+
+            // Draw action vectors
+            // Acceleration/braking intention (forward/backward)
+            Color accelColor = accelerate > 0 ? Color.green : Color.yellow;
+            Debug.DrawLine(transform.position, transform.position + transform.forward * accelerate * 3f,
+                          accelColor, visualizationDuration);
+
+            // Steering intention (left/right)
+            Color steerColor = steer > 0 ? Color.blue : Color.magenta;
+            Debug.DrawLine(transform.position, transform.position + transform.right * steer * 2f,
+                          steerColor, visualizationDuration);
+
+            // Braking (shown as red)
+            if (brake > 0.1f)
+            {
+                Debug.DrawLine(transform.position, transform.position - transform.forward * brake * 2f,
+                              Color.red, visualizationDuration);
+            }
         }
     }
 
@@ -375,28 +775,53 @@ public class CarAgent : Agent
         }
     }
 
-    // Check if the car has successfully recovered from a collision
-    private void CheckRecoveryProgress()
+    // Update checkpoint information
+    private void UpdateCheckpointInfo()
     {
-        if (!isRecovering) return;
-
-        // Check if we've moved a significant distance from collision point
-        float distanceFromCollision = Vector3.Distance(transform.position, collisionPosition);
-
-        // Check if we're making progress toward the checkpoint
-        float forwardDot = Vector3.Dot(transform.forward, directionToNextCheckpoint.normalized);
-        bool facingRightDirection = forwardDot > 0.7f;
-
-        // If we've moved away from collision point and are facing the right way
-        if (distanceFromCollision > 5.0f && facingRightDirection)
+        try
         {
-            // Reward successful recovery
-            AddTrackedReward(recoveryReward, "recovery");
-            if (enableRewardLogging) Debug.Log($"[REWARD] Car {gameObject.name} successfully recovered from collision - applying reward {recoveryReward:F3}");
-        }
+            if (checkpoints == null || checkpoints.Count == 0)
+            {
+                if (enableCheckpointDebugging)
+                    Debug.LogWarning($"[Agent {gameObject.name}] UpdateCheckpointInfo: Checkpoints list is null or empty!");
+                return;
+            }
 
-        // End recovery tracking
-        isRecovering = false;
+            if (nextCheckpointIndex < checkpoints.Count)
+            {
+                Vector3 nextCheckpointPosition = checkpoints[nextCheckpointIndex].transform.position;
+
+                distanceToNextCheckpoint = Vector3.Distance(transform.position, nextCheckpointPosition);
+                directionToNextCheckpoint = nextCheckpointPosition - transform.position;
+
+                // Debug visualization
+                if (visualizeTargetDirection)
+                {
+                    Debug.DrawLine(transform.position, nextCheckpointPosition, Color.green, 0.1f);
+
+                    if (enableCheckpointDebugging && Time.frameCount % 300 == 0)
+                    {
+                        Debug.Log($"[Agent {gameObject.name}] Drawing ray to checkpoint {nextCheckpointIndex} at {nextCheckpointPosition}");
+                    }
+                }
+            }
+            else
+            {
+                if (enableCheckpointDebugging)
+                    Debug.LogError($"[Agent {gameObject.name}] Invalid nextCheckpointIndex: {nextCheckpointIndex} (max: {checkpoints.Count - 1})");
+
+                // Fix invalid index
+                nextCheckpointIndex = 0;
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error in UpdateCheckpointInfo: {e.Message}");
+
+            // Set reasonable defaults in case of error
+            distanceToNextCheckpoint = 50f;
+            directionToNextCheckpoint = transform.forward * 50f;
+        }
     }
 
     private void UpdatePositionHistory()
@@ -446,36 +871,47 @@ public class CarAgent : Agent
         lastPositionCheck = currentPosition;
     }
 
-    // Called when all agents are ready and the TrainingManager signals a global reset
-    private void OnEpisodeReset()
+    // Called when the track is rebuilt by the TrainingManager
+    private void OnTrackRebuilt()
     {
-        if (isReadyForReset)
+        // Re-initialize checkpoints when track is rebuilt
+        if (trackHandler != null)
         {
-            // Reset flags
-            resetRequested = false;
-            isReadyForReset = false;
-            isForcedReset = false;
-            isRecovering = false;
+            checkpoints = trackHandler.GetCheckpoints();
+            nextCheckpointIndex = 0;
+            totalCheckpointsPassed = 0;
+            currentLap = 0;
+            isWaitingForTrackRebuild = false;
+            isReadyForRebuild = false;
 
-            // Re-enable components
+            // Re-enable components that might have been disabled
             if (carController != null)
             {
                 carController.enabled = true;
             }
 
+            // Reset physics state
             Rigidbody rb = GetComponent<Rigidbody>();
             if (rb != null)
             {
                 rb.isKinematic = false;
             }
 
-            // Start a new episode
-            EndEpisode();
+            if (isDebugLoggingEnabled) Debug.Log($"Car {gameObject.name} received track rebuild notification and updated checkpoints");
         }
     }
 
     public override void OnEpisodeBegin()
     {
+        // Increment agent's episode counter
+        agentEpisodeCount++;
+
+        // Report episode start to training manager
+        if (trainingManager != null)
+        {
+            trainingManager.ReportAgentEpisodeCompleted(this, agentEpisodeCount);
+        }
+
         // Get hyperparameters from Academy if needed
         maxTimeWithoutCheckpoint = Academy.Instance.EnvironmentParameters.GetWithDefault("max_time_without_checkpoint", maxTimeWithoutCheckpoint);
         speedReward = Academy.Instance.EnvironmentParameters.GetWithDefault("speed_reward", speedReward);
@@ -484,21 +920,19 @@ public class CarAgent : Agent
         noProgressPenalty = Academy.Instance.EnvironmentParameters.GetWithDefault("no_progress_penalty", noProgressPenalty);
         directionAlignmentReward = Academy.Instance.EnvironmentParameters.GetWithDefault("direction_alignment_reward", directionAlignmentReward);
         collisionPenalty = Academy.Instance.EnvironmentParameters.GetWithDefault("collision_penalty", collisionPenalty);
-        corneringReward = Academy.Instance.EnvironmentParameters.GetWithDefault("cornering_reward", corneringReward);
         noProgressThresholdTime = Academy.Instance.EnvironmentParameters.GetWithDefault("no_progress_threshold_time", noProgressThresholdTime);
 
         // Log parameters for debugging
         if (isDebugLoggingEnabled)
         {
-            Debug.Log($"[PARAMS] maxTimeWithoutCheckpoint: {maxTimeWithoutCheckpoint}, " +
-                     $"noProgressThresholdTime: {noProgressThresholdTime}, " +
-                     $"corneringReward: {corneringReward}");
+            Debug.Log($"[PARAMS] Agent {gameObject.name} starting episode {agentEpisodeCount}, " +
+                     $"maxTimeWithoutCheckpoint: {maxTimeWithoutCheckpoint}, " +
+                     $"noProgressThresholdTime: {noProgressThresholdTime}");
         }
 
         // Reset flags
-        resetRequested = false;
-        isReadyForReset = false;
-        isForcedReset = false;
+        isWaitingForTrackRebuild = false;
+        isReadyForRebuild = false;
         isRecovering = false;
 
         // Reset reward tracking
@@ -508,6 +942,7 @@ public class CarAgent : Agent
 
         // Reset the car position and state
         ResetCar();
+        ForceCheckpointReset();
 
         // Initialize checkpoint tracking
         if (trackHandler != null)
@@ -518,18 +953,16 @@ public class CarAgent : Agent
             if (raceManager != null)
             {
                 nextCheckpointIndex = raceManager.GetPlayerNextCheckpoint(gameObject);
-                Debug.Log($"[Agent {gameObject.name}] Starting episode with checkpoint index: {nextCheckpointIndex} (from RaceManager)");
+                if (isDebugLoggingEnabled) Debug.Log($"[Agent {gameObject.name}] Starting episode with checkpoint index: {nextCheckpointIndex} (from RaceManager)");
             }
             else
             {
                 nextCheckpointIndex = 0; // Fallback if race manager not available
-                Debug.Log($"[Agent {gameObject.name}] Starting episode with checkpoint index: 0 (fallback)");
+                if (isDebugLoggingEnabled) Debug.Log($"[Agent {gameObject.name}] Starting episode with checkpoint index: 0 (fallback)");
             }
 
             distanceToNextCheckpoint = 0f;
-
-            // Clear visited checkpoints
-            visitedCheckpointCount = 0;
+            currentLap = 0;
         }
         else
         {
@@ -569,6 +1002,29 @@ public class CarAgent : Agent
         lastPosition = transform.position;
         lastPositionHistoryTime = Time.time;
 
+        // Reset memory variables
+        previousPosition = transform.position;
+        previousForward = transform.forward;
+
+        // Reset interpolation values
+        interpolationTime = 0f;
+        for (int i = 0; i < 3; i++)
+        {
+            previousActions[i] = 0f;
+            currentActions[i] = 0f;
+        }
+        previousHandbrake = false;
+        currentHandbrake = false;
+
+        // Reset car inputs
+        if (carController != null)
+        {
+            carController.SetAccelerationInput(0f);
+            carController.SetSteeringInput(0f);
+            carController.SetReverseInput(0f);
+            carController.SetHandbrakeInput(false);
+        }
+
         // Initial measurement to next checkpoint
         UpdateCheckpointInfo();
         prevDistanceToCheckpoint = distanceToNextCheckpoint;  // Set initial previous distance
@@ -581,40 +1037,34 @@ public class CarAgent : Agent
         }
     }
 
-    // Called by TrainingManager to request this agent to finish and reset
-    public void RequestFinishForReset(bool forRebuild = false)
+    // Called by TrainingManager to request this agent to prepare for track rebuild
+    public void RequestTrackRebuild()
     {
-        if (!resetRequested)
+        if (!isWaitingForTrackRebuild)
         {
-            if (isDebugLoggingEnabled) Debug.Log($"Car {gameObject.name} received {(forRebuild ? "rebuild" : "reset")} request");
-            resetRequested = true;
-            resetRequestTime = Time.time;
-            isTrackRebuildPending = forRebuild;
+            if (isDebugLoggingEnabled) Debug.Log($"Car {gameObject.name} received track rebuild request");
+            isWaitingForTrackRebuild = true;
+            rebuilRequestTime = Time.time;
 
-            // If we're already in a collision or problematic state, finish immediately
+            // If we're already in a problematic state, signal ready immediately
             if (hasCollided || transform.position.y < 0)
             {
-                NotifyReadyForReset();
+                NotifyReadyForRebuild();
             }
-        }
-        else
-        {
-            // Already in reset mode - update flag if needed
-            isTrackRebuildPending = isTrackRebuildPending || forRebuild;
         }
     }
 
-    // Notify the training manager that this agent is ready for reset
-    private void NotifyReadyForReset()
+    // Notify the training manager that this agent is ready for rebuild
+    private void NotifyReadyForRebuild()
     {
-        if (!isReadyForReset)
+        if (!isReadyForRebuild)
         {
-            isReadyForReset = true;
+            isReadyForRebuild = true;
 
-            // Notify training manager we're ready for reset
+            // Notify training manager we're ready for rebuild
             if (trainingManager != null)
             {
-                trainingManager.NotifyAgentReadyForReset(isTrackRebuildPending);
+                trainingManager.NotifyAgentReadyForRebuild();
             }
 
             // Disable movement to prevent further issues
@@ -632,30 +1082,12 @@ public class CarAgent : Agent
         }
     }
 
-    // Called when the track is rebuilt by the TrainingManager
-    private void OnTrackRebuilt()
-    {
-        // Re-initialize checkpoints when track is rebuilt
-        if (trackHandler != null)
-        {
-            checkpoints = trackHandler.GetCheckpoints();
-            nextCheckpointIndex = 0;
-            totalCheckpointsPassed = 0;
-            visitedCheckpointCount = 0; // Clear visited checkpoints
-            isTrackRebuildPending = false;
-
-            if (isDebugLoggingEnabled) Debug.Log($"Car {gameObject.name} received track rebuild notification and updated checkpoints");
-        }
-    }
-
     // Called by TrainingManager to reset this agent for a new track
     public void ResetForNewTrack()
     {
         // Reset flags
-        resetRequested = false;
-        isReadyForReset = false;
-        isForcedReset = false;
-        isTrackRebuildPending = false;
+        isWaitingForTrackRebuild = false;
+        isReadyForRebuild = false;
         isRecovering = false;
 
         // Re-enable components
@@ -674,7 +1106,20 @@ public class CarAgent : Agent
         nextCheckpointIndex = 0;
         totalCheckpointsPassed = 0;
         lastCheckpointTime = Time.time;
-        visitedCheckpointCount = 0;
+        currentLap = 0;
+
+        // Reset episode count for this agent only if configured to do so
+        bool shouldResetEpisodes = (trainingManager != null) ? trainingManager.resetEpisodesAfterRebuild : true;
+
+        if (shouldResetEpisodes)
+        {
+            agentEpisodeCount = 0;
+            if (isDebugLoggingEnabled) Debug.Log($"Car {gameObject.name} episode counter reset to 0 for new track");
+        }
+        else
+        {
+            if (isDebugLoggingEnabled) Debug.Log($"Car {gameObject.name} maintaining episode count at {agentEpisodeCount} for new track");
+        }
 
         // Update checkpoints list
         if (trackHandler != null)
@@ -682,132 +1127,211 @@ public class CarAgent : Agent
             checkpoints = trackHandler.GetCheckpoints();
             if (isDebugLoggingEnabled) Debug.Log($"Car {gameObject.name} reset for new track with {checkpoints.Count} checkpoints");
         }
+        InitializeTrackMemory();
     }
 
-    // Reset the car position and state
     private void ResetCar()
     {
+        // Before doing anything, make sure car controller is valid
+        if (carController == null)
+        {
+            Debug.LogWarning("CarController is null in ResetCar, looking for it now...");
+            carController = GetComponent<CarControlScript>();
+        }
+
+        // Simply use the car controller's reset method which we know works
         if (carController != null)
         {
             try
             {
+                // Use the car controller's reset method directly
                 carController.ResetPosition();
+
+                //Debug.Log($"Car {gameObject.name} reset to rotation: {transform.rotation.eulerAngles}");
             }
             catch (Exception e)
             {
-                // Use manual reset as fallback
-                if (trackHandler != null)
-                {
-                    // Get start position from track
-                    (Vector3 startPosition, Vector3 startPosition2, Quaternion startRotation) = trackHandler.GetTrackStartTransform();
-
-                    // Manually reset the car position and rotation
-                    transform.position = startPosition;
-                    transform.rotation = startRotation;
-
-                    // Reset physics if rigidbody exists
-                    Rigidbody rb = GetComponent<Rigidbody>();
-                    if (rb != null)
-                    {
-                        rb.linearVelocity = Vector3.zero;
-                        rb.angularVelocity = Vector3.zero;
-                    }
-
-                    if (isDebugLoggingEnabled) Debug.LogWarning($"Used manual reset for {gameObject.name} due to error: {e.Message}");
-                }
-                else
-                {
-                    Debug.LogError($"Cannot reset car position: both carController and trackHandler are not usable");
-                }
+                Debug.LogError($"Error in ResetCar: {e.Message}\n{e.StackTrace}");
             }
         }
         else
         {
-            if (isDebugLoggingEnabled) Debug.LogWarning("CarController is null in ResetCar, looking for it now...");
-            carController = GetComponent<CarControlScript>();
-
-            if (carController != null)
-            {
-                try
-                {
-                    carController.ResetPosition();
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning($"Still failed to reset position: {ex.Message}");
-                }
-            }
+            Debug.LogError($"Cannot reset car position: carController is still null");
         }
     }
 
     public override void CollectObservations(VectorSensor sensor)
     {
-        // Add ray sensor data (distances to walls)
-        float[] raySensorData = sensorSystem.GetAllSensorData();
-
-        // Add each ray sensor observation individually
-        foreach (float rayDistance in raySensorData)
+        // Make sure sensor system is initialized
+        if (sensorSystem == null)
         {
-            sensor.AddObservation(rayDistance);
+            Debug.LogError("SensorSystem is null in CollectObservations!");
+            // Add blank observations to prevent errors
+            int observations = (sensorSystem.totalRayCount * 2) + 6;
+            for (int i = 0; i < observations; i++)
+            {
+                sensor.AddObservation(0f);
+            }
+            return;
         }
 
-        // Add normalized direction to next checkpoint (2 values representing a 2D direction vector)
+        // Get current ray sensor data
+        float[] raySensorData = sensorSystem.GetAllSensorData();
+
+
+
+        // 1. Add ray sensor data (distances to walls)
+        for (int i = 0; i < sensorSystem.totalRayCount; i++)
+        {
+            sensor.AddObservation(i < raySensorData.Length ? raySensorData[i] : 1.0f);
+        }
+
+        // 2. Add ray velocity data (rate of change of distances)
+        float[] velocityData = sensorSystem.GetVelocityData();
+        for (int i = 0; i < sensorSystem.totalRayCount; i++)
+        {
+            // Clamp values to reasonable ranges to prevent instability
+            float velocityValue = (i < velocityData.Length) ?
+                                  Mathf.Clamp(velocityData[i], -10f, 10f) : 0f;
+            sensor.AddObservation(velocityValue);
+        }
+
+        // 3. Add normalized direction to next checkpoint (2 values)
         float forwardDot = Vector3.Dot(transform.forward, directionToNextCheckpoint.normalized);
         float rightDot = Vector3.Dot(transform.right, directionToNextCheckpoint.normalized);
-
-        // Add direction observations
         sensor.AddObservation(forwardDot); // How aligned we are with the next checkpoint
         sensor.AddObservation(rightDot);   // If the checkpoint is to our right or left
 
-        // Add normalized distance to next checkpoint
+        // 4. Add normalized distance to next checkpoint
         sensor.AddObservation(Mathf.Clamp01(distanceToNextCheckpoint / 100f));
 
-        // Add car speed information
+        // 5. Add car speed information
         float speed = carController.GetCurrentSpeed();
         sensor.AddObservation(speed / carController.maxVelocity); // Normalized speed
 
-        // Add minimal car-specific information
+        // 6. Add car-specific information
         sensor.AddObservation(carController.isDrifting ? 1f : 0f); // Is the car drifting
+
+        // 7. Add time since last decision (helps agent understand time scale)
+        float timeSinceLastDecision = Time.fixedDeltaTime * Time.timeScale * GetComponent<Unity.MLAgents.DecisionRequester>().DecisionPeriod;
+        sensor.AddObservation(timeSinceLastDecision);
+
+        // 8. Add track observations
+        if (useTrackMemory && trackKnots != null && closestKnotIndex >= 0)
+        {
+            int knotCount = trackKnots.Length;
+
+            // Sample the upcoming knots
+            for (int i = 1; i <= lookAheadCount; i++)
+            {
+                int knotIndex = (closestKnotIndex + i) % knotCount;
+
+                if (discoveredKnots[knotIndex])
+                {
+                    // Get the knot positions
+                    Vector3 centerPos = trackKnots[knotIndex];
+                    Vector3 leftPos = leftWallKnots[knotIndex];
+                    Vector3 rightPos = rightWallKnots[knotIndex];
+
+                    // Calculate relative position to car (in local space)
+                    Vector3 localCenter = transform.InverseTransformPoint(centerPos);
+
+                    // Calculate distance to this knot
+                    float distance = Vector3.Distance(transform.position, centerPos);
+
+                    // Calculate track width
+                    float width = Vector3.Distance(leftPos, rightPos);
+
+                    // Calculate track direction
+                    int nextIndex = (knotIndex + 1) % knotCount;
+                    Vector3 nextPos = trackKnots[nextIndex];
+                    Vector3 trackDirection = (nextPos - centerPos).normalized;
+                    float trackAngle = Vector3.SignedAngle(transform.forward, trackDirection, Vector3.up);
+
+                    // Calculate banking angle
+                    float heightDiff = rightPos.y - leftPos.y;
+                    float bankAngle = Mathf.Atan2(heightDiff, width) * Mathf.Rad2Deg;
+
+                    // Add observations (normalized)
+                    sensor.AddObservation(Mathf.Clamp01(distance / 100f));  // Distance to knot
+                    sensor.AddObservation(localCenter.x / 50f);            // X position relative to car
+                    sensor.AddObservation(localCenter.z / 50f);            // Z position relative to car
+                    sensor.AddObservation(width / 20f);                    // Track width
+                    sensor.AddObservation(trackAngle / 180f);              // Track angle
+                    sensor.AddObservation(bankAngle / 45f);                // Track banking
+                }
+                else
+                {
+                    // Add zeros for undiscovered knots
+                    for (int j = 0; j < 6; j++)
+                        sensor.AddObservation(0f);
+                }
+            }
+        }
+
+
     }
 
     public override void OnActionReceived(ActionBuffers actionBuffers)
     {
-        // If we're waiting for reset, don't process actions
-        if (isReadyForReset)
+        // Store latest actions for visualization
+        if (actionBuffers.ContinuousActions.Length > 0)
+        {
+            latestContinuousActions = new float[actionBuffers.ContinuousActions.Length];
+            for (int i = 0; i < actionBuffers.ContinuousActions.Length; i++)
+            {
+                latestContinuousActions[i] = actionBuffers.ContinuousActions[i];
+            }
+        }
+
+        if (actionBuffers.DiscreteActions.Length > 0)
+        {
+            latestDiscreteActions = new int[actionBuffers.DiscreteActions.Length];
+            for (int i = 0; i < actionBuffers.DiscreteActions.Length; i++)
+            {
+                latestDiscreteActions[i] = actionBuffers.DiscreteActions[i];
+            }
+        }
+
+        // If we're waiting for rebuild, don't process actions
+        if (isReadyForRebuild)
             return;
 
         try
         {
-            // Extract continuous actions
-            float accelerate = 0f;
-            float steer = 0f;
-            float brake = 0f;
-
+            // Extract continuous actions and store for interpolation
             if (actionBuffers.ContinuousActions.Length >= 3)
             {
-                accelerate = actionBuffers.ContinuousActions[0];
-                steer = actionBuffers.ContinuousActions[1];
-                brake = actionBuffers.ContinuousActions[2];
+                // Move current actions to previous 
+                for (int i = 0; i < 3; i++)
+                {
+                    previousActions[i] = currentActions[i];
+                }
+
+                // Store new current actions
+                currentActions[0] = actionBuffers.ContinuousActions[0]; // accelerate
+                currentActions[1] = actionBuffers.ContinuousActions[1]; // steer
+                currentActions[2] = actionBuffers.ContinuousActions[2]; // brake
 
                 // Debug visualization only if enabled
                 if (visualizeTargetDirection)
                 {
-                    Debug.DrawRay(transform.position, transform.forward * accelerate * 5f, Color.green);
-                    Debug.DrawRay(transform.position, transform.right * steer * 5f, Color.red);
+                    Debug.DrawRay(transform.position, transform.forward * currentActions[0] * 5f, Color.green);
+                    Debug.DrawRay(transform.position, transform.right * currentActions[1] * 5f, Color.red);
                 }
 
                 // Calculate steering smoothness penalty
-                float steerDelta = Mathf.Abs(steer - prevSteer);
+                float steerDelta = Mathf.Abs(currentActions[1] - prevSteer);
                 if (steerDelta > 0.3f) // Only penalize large, abrupt steering changes
                 {
                     AddTrackedReward(steerDelta * jerkySteeringPenalty, "jerky_steering");
                 }
-                prevSteer = steer;
+                prevSteer = currentActions[1];
 
                 // Apply penalty for using reverse
-                if (brake > 0.5f)
+                if (currentActions[2] > 0.5f)
                 {
-                    AddTrackedReward(reversePenalty * brake, "reverse");
+                    AddTrackedReward(reversePenalty * currentActions[2], "reverse");
                 }
             }
             else
@@ -815,24 +1339,35 @@ public class CarAgent : Agent
                 Debug.LogWarning($"Expected 3 continuous actions, but got {actionBuffers.ContinuousActions.Length}");
             }
 
-            // Extract discrete action (handbrake)
-            isUsingHandbrake = false;
+            // Extract discrete action (handbrake) and store for interpolation
             if (actionBuffers.DiscreteActions.Length > 0)
             {
-                isUsingHandbrake = actionBuffers.DiscreteActions[0] == 1;
+                previousHandbrake = currentHandbrake;
+                currentHandbrake = actionBuffers.DiscreteActions[0] == 1;
+                isUsingHandbrake = currentHandbrake; // Keep this for other logic
             }
 
-            // Apply inputs to car controller
-            SetCarInputs(accelerate, steer, brake, isUsingHandbrake);
+            // Reset interpolation timer
+            interpolationTime = 0f;
+
+            // Update decision interval dynamically
+            var decisionRequester = GetComponent<Unity.MLAgents.DecisionRequester>();
+            if (decisionRequester != null)
+            {
+                decisionInterval = Time.fixedDeltaTime * decisionRequester.DecisionPeriod;
+            }
+
+            // Remove direct SetCarInputs call - it will be called in FixedUpdate with interpolation
+            // SetCarInputs(accelerate, steer, brake, isUsingHandbrake);
 
             // Check if race is active
             bool isRaceActive = raceManager != null && raceManager.IsRaceActive();
 
-            // Check timeouts unless we're in reset mode
+            // Check timeouts unless we're waiting for rebuild
             float timeSinceLastCheckpoint = Time.time - lastCheckpointTime;
             float episodeTime = Time.time - episodeStartTime;
 
-            if (!resetRequested && isRaceActive &&
+            if (!isWaitingForTrackRebuild && isRaceActive &&
                 (timeSinceLastCheckpoint > maxTimeWithoutCheckpoint ||
                 episodeTime > maxEpisodeTime))
             {
@@ -853,16 +1388,8 @@ public class CarAgent : Agent
                 // Penalty for timeout
                 AddTrackedReward(-1.0f, "timeout");
 
-                // Request a synchronized episode reset
-                if (trainingManager != null)
-                {
-                    trainingManager.RequestEpisodeReset();
-                }
-                else
-                {
-                    // If no TrainingManager, just end this episode
-                    EndEpisode();
-                }
+                // Reset this agent (no synchronization required)
+                EndEpisode();
                 return;
             }
 
@@ -879,10 +1406,10 @@ public class CarAgent : Agent
             prevDistanceToCheckpoint = distanceToNextCheckpoint;
             prevPosition = transform.position;
 
-            // If we've been asked to finish for reset and we hit a wall, notify
-            if (resetRequested && hasCollided)
+            // If we've been asked to prepare for rebuild and we hit a wall, notify
+            if (isWaitingForTrackRebuild && hasCollided)
             {
-                NotifyReadyForReset();
+                NotifyReadyForRebuild();
             }
         }
         catch (Exception ex)
@@ -971,41 +1498,20 @@ public class CarAgent : Agent
         bool isTurning = steeringMagnitude > 0.3f; // Threshold for significant turning
         bool isDrifting = carController.isDrifting;
 
-        if (isTurning)
-        {
-            // Base cornering reward - maintaining speed through corners is good
-            float normalizedSpeed = speed / carController.maxVelocity;
-            float cornerSpeedReward = normalizedSpeed * corneringReward;
-
-            // Additional reward for successful handbrake turns in tight corners
-            if (isUsingHandbrake && steeringMagnitude > 0.6f && speed > carController.maxVelocity * 0.4f)
-            {
-                // Reward handbrake usage in tight corners
-                AddTrackedReward(corneringReward * 1.5f, "handbrake_turn");
-
-                if (isDrifting)
-                {
-                    // Extra reward for controlled drifting
-                    AddTrackedReward(corneringReward * 0.5f, "drift");
-                }
-            }
-
-            // Reward for maintaining direction to next checkpoint while cornering
-            float forwardDotDuringCorner = Vector3.Dot(transform.forward, directionToNextCheckpoint.normalized);
-            if (forwardDotDuringCorner > 0.5f) // Still generally pointing toward checkpoint
-            {
-                AddTrackedReward(cornerSpeedReward, "cornering");
-            }
-        }
-
         // Normal speed reward (will be applied whether cornering or not)
         float speedRewardValue = speed * speedReward;
         AddTrackedReward(speedRewardValue, "speed");
 
         // 3. Direction alignment reward - more important now
         float forwardDot = Vector3.Dot(transform.forward, directionToNextCheckpoint.normalized);
-        // Square the dot product to emphasize proper alignment
+        // Use a stronger non-linear function to emphasize proper alignment
+        // Square the dot product and ensure it's only positive
         float alignmentReward = Mathf.Pow(Mathf.Max(0, forwardDot), 2) * directionAlignmentReward;
+        // Additional bonus for perfect alignment
+        if (forwardDot > 0.9f)
+        {
+            alignmentReward *= 1.5f; // Bonus for near-perfect alignment
+        }
         AddTrackedReward(alignmentReward, "alignment");
 
         // 4. Survival reward for staying on track
@@ -1018,52 +1524,38 @@ public class CarAgent : Agent
             // Handle collision based on the current training mode
             bool useStrictMode = trainingManager != null && trainingManager.IsUsingStrictResets();
 
-            // Always add the collision penalty (reduced from before)
+            // Apply stronger collision penalty
             AddTrackedReward(collisionPenalty, "collision");
 
             if (enableResetReasonLogging)
                 Debug.LogWarning($"[COLLISION] Car {gameObject.name} collided with obstacle");
 
-            // If we're in reset mode, notify immediately
-            if (resetRequested)
+            // If we're waiting for rebuild, notify immediately
+            if (isWaitingForTrackRebuild)
             {
                 hasCollided = false;
-                lastResetReason = "Collision during reset request";
-                NotifyReadyForReset();
+                lastResetReason = "Collision during rebuild request";
+                NotifyReadyForRebuild();
                 return;
             }
 
-            // If using strict resets and not in recovery mode
+            // Modified collision handling: Only reset in strict mode
+            // No longer reset on high speed collisions automatically
             if (resetOnCollision && useStrictMode)
             {
-                // Apply more severe penalty for crashing
+                // Apply more severe penalty for crashing in strict mode
                 AddTrackedReward(-1.0f, "severe_collision");
-
                 lastResetReason = "Collision with strict reset";
 
-                // Request synchronized reset
-                if (trainingManager != null)
-                {
-                    trainingManager.RequestEpisodeReset();
-                }
-                else
-                {
-                    EndEpisode();
-                }
+                // End episode for this agent
+                EndEpisode();
             }
             else
             {
                 // In recovery mode - start tracking recovery
                 collisionPosition = transform.position;
                 recoveryStartTime = Time.time;
-                isRecovering = true;
-
-                // Apply a gentler velocity reduction to simulate impact
-                if (speed > 10f)
-                {
-                    Rigidbody rb = GetComponent<Rigidbody>();
-                    if (rb != null) rb.linearVelocity *= 0.9f;
-                }
+                isRecovering = true;              
             }
 
             // Reset collision flag
@@ -1071,6 +1563,7 @@ public class CarAgent : Agent
         }
     }
 
+    // Called when a checkpoint is passed
     private void OnRaceManagerCheckpointPassed(GameObject player, int checkpointIndex, int totalCheckpoints)
     {
         // Only process events for this agent
@@ -1082,9 +1575,9 @@ public class CarAgent : Agent
                           $"index={checkpointIndex}, total={totalCheckpoints}");
             }
 
-            // Get next expected checkpoint directly from RaceManager
+            // Get next expected checkpoint
             int previousIndex = nextCheckpointIndex;
-            nextCheckpointIndex = raceManager.GetPlayerNextCheckpoint(gameObject);
+            nextCheckpointIndex = (checkpointIndex + 1) % checkpoints.Count;
 
             if (enableCheckpointDebugging)
             {
@@ -1101,12 +1594,46 @@ public class CarAgent : Agent
             lastCheckpointTime = Time.time;
             totalCheckpointsPassed++;
 
-            // Update the visited checkpoints array
-            if (visitedCheckpointCount < visitedCheckpoints.Length)
+            // Check for lap completion - if we just hit the last checkpoint and next is 0
+            if (checkpointIndex == checkpoints.Count - 1 && nextCheckpointIndex == 0)
             {
-                visitedCheckpoints[visitedCheckpointCount++] = checkpointIndex;
+                currentLap++;
             }
         }
+    }
+
+    private void ForceCheckpointReset()
+    {
+        // Reset all checkpoint tracking
+        nextCheckpointIndex = 0;
+        totalCheckpointsPassed = 0;
+        currentLap = 0;
+
+        // Reset related variables
+        lastCheckpointTime = Time.time;
+        currentLapCheckpoints = 0;
+        lapProgress = 0f;
+
+        // Tell RaceManager to reset this agent's checkpoint
+        if (raceManager != null)
+        {
+            try
+            {
+                raceManager.ResetAgent(gameObject);
+
+                // Sync with RaceManager's checkpoint
+                nextCheckpointIndex = raceManager.GetPlayerNextCheckpoint(gameObject);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"Failed to reset checkpoint in RaceManager: {e.Message}");
+                // Fallback to 0
+                nextCheckpointIndex = 0;
+            }
+        }
+
+        // Update checkpoint info
+        UpdateCheckpointInfo();
     }
 
     // Calculate checkpoint rewards without changing checkpoint index
@@ -1154,22 +1681,14 @@ public class CarAgent : Agent
         if (trainingManager != null)
         {
             trainingManager.RecordLapCompletion(lapTime);
+
+            // Report the agent's episode count
+            trainingManager.ReportAgentEpisodeCompleted(this, agentEpisodeCount);
         }
 
         // Reset lap tracking
         currentLapCheckpoints = 0;
         totalDistanceTraveled = 0f;
-
-        // Clear visited checkpoints at the start of a new lap
-        visitedCheckpointCount = 0;
-        // Add start checkpoint as visited
-        visitedCheckpoints[visitedCheckpointCount++] = 0;
-
-        // Increment episode counter in TrainingManager
-        if (trainingManager != null)
-        {
-            trainingManager.IncrementEpisode();
-        }
 
         if (enableCheckpointDebugging)
         {
@@ -1203,51 +1722,6 @@ public class CarAgent : Agent
         }
     }
 
-    private void UpdateCheckpointInfo()
-    {
-        if (checkpoints == null || checkpoints.Count == 0)
-        {
-            if (enableCheckpointDebugging)
-                Debug.LogWarning($"[Agent {gameObject.name}] UpdateCheckpointInfo: Checkpoints list is null or empty!");
-            return;
-        }
-
-        if (nextCheckpointIndex < checkpoints.Count)
-        {
-            Vector3 nextCheckpointPosition = checkpoints[nextCheckpointIndex].transform.position;
-            Vector3 previousDirection = directionToNextCheckpoint; // Store previous for comparison
-
-            distanceToNextCheckpoint = Vector3.Distance(transform.position, nextCheckpointPosition);
-            directionToNextCheckpoint = nextCheckpointPosition - transform.position;
-
-            // Debug visualization
-            if (visualizeTargetDirection)
-            {
-                Debug.DrawLine(transform.position, nextCheckpointPosition, Color.green, 0.1f);
-
-                if (enableCheckpointDebugging && Time.frameCount % 300 == 0)
-                {
-                    Debug.Log($"[Agent {gameObject.name}] Drawing ray to checkpoint {nextCheckpointIndex} at {nextCheckpointPosition}");
-                }
-            }
-
-            // Verify direction changed
-            if (enableCheckpointDebugging && previousDirection != Vector3.zero && Time.frameCount % 300 == 0)
-            {
-                bool directionChanged = Vector3.Angle(previousDirection.normalized, directionToNextCheckpoint.normalized) > 5f;
-                if (directionChanged)
-                {
-                    Debug.Log($"[Agent {gameObject.name}] Direction to checkpoint {nextCheckpointIndex} CHANGED to {directionToNextCheckpoint.normalized}");
-                }
-            }
-        }
-        else
-        {
-            if (enableCheckpointDebugging)
-                Debug.LogError($"[Agent {gameObject.name}] Invalid nextCheckpointIndex: {nextCheckpointIndex} (max: {checkpoints.Count - 1})");
-        }
-    }
-
     // Called when the car collides with something
     public void ReportCollision()
     {
@@ -1261,19 +1735,6 @@ public class CarAgent : Agent
         carController.SetSteeringInput(steer);
         carController.SetReverseInput(brake);
         carController.SetHandbrakeInput(handbrake);
-    }
-
-    // Override the heuristic for manual control testing
-    public override void Heuristic(in ActionBuffers actionsOut)
-    {
-        var continuousActionsOut = actionsOut.ContinuousActions;
-        var discreteActionsOut = actionsOut.DiscreteActions;
-
-        continuousActionsOut[0] = Input.GetAxis("Vertical");    // Accelerate with W/Up
-        continuousActionsOut[1] = Input.GetAxis("Horizontal");  // Steer with A/D or Left/Right
-        continuousActionsOut[2] = Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow) ? 1f : 0f;  // Brake with S/Down
-
-        discreteActionsOut[0] = Input.GetKey(KeyCode.Space) ? 1 : 0;  // Handbrake with Space
     }
 
     // Reward tracking methods
@@ -1313,6 +1774,23 @@ public class CarAgent : Agent
         Debug.Log(sb.ToString());
     }
 
+    // Reset checkpoint state for new episode
+    private void ResetCheckpointState()
+    {
+        nextCheckpointIndex = 0;
+        totalCheckpointsPassed = 0;
+        currentLap = 0;
+        lastCheckpointTime = Time.time;
+
+        // Force sync with RaceManager if available
+        if (raceManager != null)
+        {
+            nextCheckpointIndex = raceManager.GetPlayerNextCheckpoint(gameObject);
+        }
+
+        UpdateCheckpointInfo();
+    }
+
     protected override void OnDisable()
     {
         base.OnDisable();
@@ -1321,7 +1799,6 @@ public class CarAgent : Agent
         if (trainingManager != null)
         {
             trainingManager.OnTrackRebuilt -= OnTrackRebuilt;
-            trainingManager.OnEpisodeReset -= OnEpisodeReset;
         }
         if (raceManager != null)
         {
@@ -1335,7 +1812,6 @@ public class CarAgent : Agent
         if (trainingManager != null)
         {
             trainingManager.OnTrackRebuilt -= OnTrackRebuilt;
-            trainingManager.OnEpisodeReset -= OnEpisodeReset;
         }
         if (raceManager != null)
         {

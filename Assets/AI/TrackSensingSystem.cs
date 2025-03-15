@@ -1,41 +1,44 @@
 using UnityEngine;
 using System.Collections.Generic;
-using Assets.TrackGeneration;
 
 public class TrackSensingSystem : MonoBehaviour
 {
     public Transform raycastOrigin; // Position to cast rays from (car front)
-    public float sensorLength = 20f; // Max length of the sensor rays
-    public string trackWallTag = "Wall"; // Tag for track walls
+    private float sensorLength = 25f; // Max length of the sensor rays
+    private float sideMultiplier = 0.8f; // Multiplier for side rays
+    private float verticalMultiplier = 0.6f; // Multiplier for vertical rays
+    private string trackWallTag = "Wall"; // Tag for track walls
     public bool visualizeRays = true; // Debug visualization toggle
 
     [Range(3, 36)]
-    public int rayCount = 9; // Number of rays to cast
-    public float rayAngle = 180f; // Total angle covered by rays (180 = semicircle in front)
-    private float[] rayDistances; // Normalized distances to walls (1 = no obstacle, 0 = obstacle at sensor position)
+    private int rayCount = 5; // Number of horizontal rays to cast
+    private float rayAngle = 180f; // Total angle covered by rays (180 = semicircle in front)
+    private float verticalRayAngle = 5f; // Angle for up/down rays - fixed at 5 degrees
+    private bool useVerticalRays = true; // Toggle for vertical rays
 
-    // NEW: Performance optimizations
-    [Header("Performance")]
-    public int raycastFrameSkip = 1; // Skip frames for raycast (0 = cast every frame)
-    public LayerMask raycastLayers; // Specific layers to raycast against
-    public bool enableLodSystem = true; // Enable/disable LOD for raycasts
-
-    // NEW: LOD system
-    private int frameCounter = 0;
-    private bool isVisible = true;
-    private Camera mainCamera;
-
-    // Wall detection thresholds
-    public float collisionWarningThreshold = 0.2f; // Threshold to detect imminent collisions
+    public int totalRayCount; // Total number of rays (horizontal + vertical)
+    private float[] rayDistances; // Normalized distances to walls
+    private float[] previousRayDistances; // Previous frame's distances for calculating velocity
+    private float[] rayVelocities; // Velocity of ray distances (rate of change)
+    private Vector3[] rayOrigins; // Array to store ray origin positions
+    private Vector3[] rayDirections; // Array to store ray directions
+    private LayerMask raycastLayerMask; // Layer mask for raycasting
 
     // Add a reference to the car's rigidbody to get velocity information
     private Rigidbody carRigidbody;
     private CarAgent carAgent;
 
     void Awake()
-    {
-        // Initialize arrays for sensor readings
-        rayDistances = new float[rayCount];
+    { 
+        // Calculate total ray count
+        totalRayCount = rayCount + (useVerticalRays ? 6 : 0);
+
+        // Initialize arrays for sensor readings with proper size
+        rayDistances = new float[totalRayCount];
+        previousRayDistances = new float[totalRayCount];
+        rayVelocities = new float[totalRayCount];
+        rayOrigins = new Vector3[totalRayCount];
+        rayDirections = new Vector3[totalRayCount];
 
         // Get the car's rigidbody
         carRigidbody = GetComponent<Rigidbody>();
@@ -51,120 +54,192 @@ public class TrackSensingSystem : MonoBehaviour
         if (raycastOrigin == null)
             raycastOrigin = transform;
 
-        // Find main camera
-        mainCamera = Camera.main;
-
-        // Initialize rayDistances with maximum values
-        for (int i = 0; i < rayDistances.Length; i++)
+        // Initialize previous distances with maximum values
+        for (int i = 0; i < totalRayCount; i++)
         {
-            rayDistances[i] = 1.0f;
+            previousRayDistances[i] = 1.0f;
+            rayVelocities[i] = 0.0f;
         }
 
-        // Set up raycast layers if not set
-        if (raycastLayers.value == 0)
+        SetupRaycastLayerMask();
+    }
+
+    private void SetupRaycastLayerMask()
+    {
+        // Get the Checkpoint layer number (should match what's defined in Checkpoint class)
+        int checkpointLayer = 2; // Default to layer 10
+
+        // Check if we can get the layer by name (more robust)
+        int namedLayer = LayerMask.NameToLayer("Ignore Raycast");
+        if (namedLayer != -1)
         {
-            raycastLayers = Physics.DefaultRaycastLayers;
+            checkpointLayer = namedLayer;
         }
+
+        // Create a layer mask that includes everything
+        raycastLayerMask = ~0;
+
+        // Remove the Checkpoint layer from the mask (~ is bitwise NOT)
+        raycastLayerMask &= ~(1 << checkpointLayer);
+
+        Debug.Log($"Raycast layer mask setup to ignore layer {checkpointLayer} (Checkpoint/Floor)");
     }
 
     void FixedUpdate()
     {
-        // Increment frame counter
-        frameCounter++;
-
-        // NEW: Check if we should skip this frame
-        if (raycastFrameSkip > 0 && frameCounter % (raycastFrameSkip + 1) != 0)
-        {
-            return;
-        }
-
-        // NEW: If LOD is enabled, check if we're visible before casting rays
-        if (enableLodSystem && mainCamera != null)
-        {
-            // Simple LOD - only cast rays if we're in camera view or very close
-            isVisible = IsVisibleToCamera() || IsCloseToCamera(50f);
-
-            if (!isVisible)
-            {
-                return; // Skip raycasting when not visible
-            }
-        }
+        // Store previous ray distances before updating
+        System.Array.Copy(rayDistances, previousRayDistances, totalRayCount);
 
         // Perform sensing
         CastForwardRays();
+
+        // Calculate ray velocities (change in distance per second)
+        CalculateRayVelocities();
     }
 
-    // NEW: Check if the agent is visible to the camera
-    private bool IsVisibleToCamera()
-    {
-        if (mainCamera == null) return true;
-
-        Vector3 screenPoint = mainCamera.WorldToViewportPoint(transform.position);
-        return screenPoint.z > 0 && screenPoint.x > -0.1f && screenPoint.x < 1.1f &&
-               screenPoint.y > -0.1f && screenPoint.y < 1.1f;
-    }
-
-    // NEW: Check if the agent is close to the camera
-    private bool IsCloseToCamera(float maxDistance)
-    {
-        if (mainCamera == null) return true;
-
-        return Vector3.Distance(transform.position, mainCamera.transform.position) < maxDistance;
-    }
 
     void CastForwardRays()
     {
-        if (rayCount < 1) return;
-
         // Calculate the angle between rays
         float angleStep = rayAngle / (rayCount - 1);
         float startAngle = -rayAngle / 2f;
 
-        // NEW: Pre-calculate raycast data for better performance
-        Vector3 originPosition = raycastOrigin.position;
-        Vector3 forwardDirection = raycastOrigin.forward;
+        // Get indices for left, center, right rays
+        int leftIndex = 0;
+        int centerIndex = rayCount / 2;  // For odd numbers, this is the middle ray (4)
+        int rightIndex = rayCount - 1;
 
-        // Cast rays in a fan pattern
+        // Cast 9 straight horizontal rays
         for (int i = 0; i < rayCount; i++)
         {
-            float currentAngle = startAngle + angleStep * i;
-            // This creates a fan pattern from left to front to right
-            Vector3 direction = Quaternion.Euler(0, currentAngle, 0) * forwardDirection;
+            float horizontalAngle = startAngle + angleStep * i;
 
-            RaycastHit hit;
-            if (Physics.Raycast(originPosition, direction, out hit, sensorLength, raycastLayers))
+            // Calculate distance from center index (0 at center, 1 at edges)
+            float normalizedDistanceFromCenter = Mathf.Abs(i - centerIndex) / (float)centerIndex;
+
+            // Lerp between full size (at center) and 0.8x (at edges)
+            float lerpedMultiplier = Mathf.Lerp(1.0f, sideMultiplier, normalizedDistanceFromCenter);
+            float currentSensorLength = sensorLength * lerpedMultiplier;
+
+            // Create direction for horizontal ray (straight forward from the car perspective)
+            Vector3 direction = Quaternion.Euler(0, horizontalAngle, 0) * raycastOrigin.forward;
+
+            // Store ray origin and direction
+            rayOrigins[i] = raycastOrigin.position;
+            rayDirections[i] = direction;
+
+            // Cast the ray and process hit with the appropriate length
+            CastRayAndProcessHit(i, direction, null, null, currentSensorLength);
+        }
+
+        // Add vertical rays if enabled
+        if (useVerticalRays)
+        {
+            int upDownIndex = rayCount;
+            float verticalSensorLength = sensorLength * verticalMultiplier; // Vertical rays are 0.6x the size
+
+            // Array of positions to add vertical rays (left, center, right)
+            int[] keyPositions = { leftIndex, centerIndex, rightIndex };
+
+            // Add up rays at 5 degree angle at left, center, right
+            for (int i = 0; i < 3; i++)
             {
-                // Check if we hit something with the track wall tag
-                if (hit.collider.CompareTag(trackWallTag))
-                {
-                    // Normalize the distance (1 = max distance, 0 = collision)
-                    rayDistances[i] = hit.distance / sensorLength;
+                int baseIndex = keyPositions[i];
+                float horizontalAngle = startAngle + angleStep * baseIndex;
 
-                    // Visualize the ray hit
-                    if (visualizeRays)
-                        Debug.DrawLine(originPosition, hit.point, Color.red);
-                }
-                else
-                {
-                    // Hit something that's not a track wall
-                    rayDistances[i] = 1.0f;
+                // Create up ray direction (5 degrees up)
+                Vector3 upDirection = Quaternion.Euler(verticalRayAngle, horizontalAngle, 0) * raycastOrigin.forward;
 
-                    if (visualizeRays)
-                        Debug.DrawLine(originPosition, hit.point, Color.yellow);
-                }
+                // Store ray data
+                rayOrigins[upDownIndex] = raycastOrigin.position;
+                rayDirections[upDownIndex] = upDirection;
+
+                // Cast ray with special color for up rays and reduced length
+                CastRayAndProcessHit(upDownIndex, upDirection, new Color(0, 1, 0.5f), new Color(1, 0, 0.5f), verticalSensorLength);
+
+                upDownIndex++;
             }
-            else
-            {
-                // No obstacle detected within range
-                rayDistances[i] = 1.0f;
 
-                // Visualize the full ray
-                if (visualizeRays)
-                    Debug.DrawRay(originPosition, direction * sensorLength, Color.green);
+            // Add down rays at 5 degree angle at left, center, right
+            for (int i = 0; i < 3; i++)
+            {
+                int baseIndex = keyPositions[i];
+                float horizontalAngle = startAngle + angleStep * baseIndex;
+
+                // Create down ray direction (5 degrees down)
+                Vector3 downDirection = Quaternion.Euler(-verticalRayAngle, horizontalAngle, 0) * raycastOrigin.forward;
+
+                // Store ray data
+                rayOrigins[upDownIndex] = raycastOrigin.position;
+                rayDirections[upDownIndex] = downDirection;
+
+                // Cast ray with special color for down rays and reduced length
+                CastRayAndProcessHit(upDownIndex, downDirection, new Color(0.5f, 1, 0), new Color(1, 0.5f, 0), verticalSensorLength);
+
+                upDownIndex++;
             }
         }
     }
 
+    // Helper method to avoid code duplication
+    private void CastRayAndProcessHit(int rayIndex, Vector3 direction, Color? noHitColor = null, Color? hitColor = null, float? customSensorLength = null)
+    {
+        // Default colors
+        Color normalNoHitColor = Color.green;
+        Color normalHitColor = Color.red;
+
+        // Use custom sensor length if provided, otherwise use the default
+        float currentSensorLength = customSensorLength ?? sensorLength;
+
+        RaycastHit hit;
+        if (Physics.Raycast(raycastOrigin.position, direction, out hit, currentSensorLength, raycastLayerMask))
+        {
+            // Check if we hit something with the track wall tag
+            if (hit.collider.CompareTag(trackWallTag))
+            {
+                // Normalize the distance (1 = max distance, 0 = collision)
+                rayDistances[rayIndex] = hit.distance / currentSensorLength;
+
+                // Visualize the ray hit
+                if (visualizeRays)
+                    Debug.DrawLine(raycastOrigin.position, hit.point, hitColor ?? normalHitColor);
+            }
+            else
+            {
+                // Hit something that's not a track wall
+                rayDistances[rayIndex] = 1.0f;
+
+                if (visualizeRays)
+                    Debug.DrawLine(raycastOrigin.position, hit.point, Color.yellow);
+            }
+        }
+        else
+        {
+            // No obstacle detected within range
+            rayDistances[rayIndex] = 1.0f;
+
+            // Visualize the full ray
+            if (visualizeRays)
+                Debug.DrawRay(raycastOrigin.position, direction * currentSensorLength, noHitColor ?? normalNoHitColor);
+        }
+    }
+
+    // Calculate velocities of ray distances (how quickly distances are changing)
+    void CalculateRayVelocities()
+    {
+        float deltaTime = Time.fixedDeltaTime;
+        if (deltaTime <= 0f) deltaTime = 0.02f; // Fallback value to prevent division by zero
+
+        for (int i = 0; i < totalRayCount; i++)
+        {
+            // Calculate the rate of change in distance
+            // Positive value = object moving away, Negative value = object approaching
+            rayVelocities[i] = (rayDistances[i] - previousRayDistances[i]) / deltaTime;
+
+            // Clamp velocity to reasonable range to avoid huge spikes
+            rayVelocities[i] = Mathf.Clamp(rayVelocities[i], -10f, 10f);
+        }
+    }
 
     // Get the normalized ray distances (accessible to the AI agent)
     public float[] GetRayDistances()
@@ -172,6 +247,11 @@ public class TrackSensingSystem : MonoBehaviour
         return rayDistances;
     }
 
+    // Get the ray velocity data (change in distance per second)
+    public float[] GetVelocityData()
+    {
+        return rayVelocities;
+    }
 
     // Get the combined sensor data as one array
     public float[] GetAllSensorData()
@@ -181,114 +261,41 @@ public class TrackSensingSystem : MonoBehaviour
         return combined;
     }
 
-    // Helper method to check if we're about to collide with a wall
-    public bool IsWallAhead()
+    // Get ray origins for visualization
+    public Vector3[] GetRayOrigins()
     {
-        // Check frontal rays for imminent collision
-        for (int i = 0; i < rayCount; i++)
-        {
-            if (rayDistances[i] < collisionWarningThreshold)
-                return true;
-        }
-        return false;
+        return rayOrigins;
     }
 
-    // Calculate the best direction to move based on sensor readings
-    public float GetSuggestedSteeringDirection()
+    // Get ray directions for visualization
+    public Vector3[] GetRayDirections()
     {
-        if (rayCount < 3) return 0f;
-
-        // Find the ray with the largest distance value (most open space)
-        float maxDistance = 0f;
-        int bestRayIndex = rayCount / 2; // Default to center ray
-
-        for (int i = 0; i < rayCount; i++)
-        {
-            if (rayDistances[i] > maxDistance)
-            {
-                maxDistance = rayDistances[i];
-                bestRayIndex = i;
-            }
-        }
-
-        // Convert ray index to a steering direction from -1 to 1
-        float normalizedDirection = (bestRayIndex - (rayCount - 1) / 2f) / ((rayCount - 1) / 2f);
-        return Mathf.Clamp(normalizedDirection, -1f, 1f);
+        return rayDirections;
     }
 
-    // Additional helper methods for the AI
-    public float GetAverageWallDistance()
+    // Get the maximum ray distance (sensorLength)
+    public float GetMaxRayDistance()
     {
-        float sum = 0f;
-        for (int i = 0; i < rayDistances.Length; i++)
-        {
-            sum += rayDistances[i];
-        }
-        return sum / rayDistances.Length;
+        return sensorLength;
     }
 
-    // Improved collision detection to better handle wall collisions
     private void OnCollisionEnter(Collision collision)
     {
-        // Skip if carAgent is null
-        if (carAgent == null)
-            return;
-
         // Check if this is a wall collision using tag
         if (collision.gameObject.CompareTag(trackWallTag))
         {
-            // Calculate collision intensity based on relative velocity
-            float collisionIntensity = 0f;
-
-            if (carRigidbody != null)
+            // Notify the agent of the collision
+            if (carAgent != null)
             {
-                Vector3 relativeVelocity = collision.relativeVelocity;
-                collisionIntensity = relativeVelocity.magnitude;
-
-                // Only report significant collisions (reduces false positives from light touches)
-                if (collisionIntensity > 1.0f)
-                {
-                    // Notify the agent of the collision
-                    carAgent.ReportCollision();
-
-                    // For debugging
-                    if (visualizeRays)
-                    {
-                        Debug.DrawRay(collision.contacts[0].point, collision.contacts[0].normal * 3, Color.red, 1.0f);
-                    }
-                }
-            }
-            else
-            {
-                // Fallback if no rigidbody - always report the collision
                 carAgent.ReportCollision();
             }
         }
     }
 
-    // NEW: Helper to visualize when debugging
-    private void OnDrawGizmos()
+    // Public method to properly initialize raycast origin
+    public void InitializeRaycastOrigin(Transform carBodyTransform)
     {
-        if (Application.isPlaying && visualizeRays && carAgent != null)
-        {
-            Gizmos.color = Color.cyan;
-            Gizmos.DrawWireSphere(transform.position, 1.0f);
-
-            // Show checkpoints if available
-            if (carAgent.GetType().GetField("nextCheckpointIndex") != null &&
-                carAgent.GetType().GetField("checkpoints") != null)
-            {
-                int nextCheckpointIndex = (int)carAgent.GetType().GetField("nextCheckpointIndex").GetValue(carAgent);
-                List<Checkpoint> checkpoints = carAgent.GetType().GetField("checkpoints").GetValue(carAgent) as List<Checkpoint>;
-
-                if (checkpoints != null && checkpoints.Count > 0 && nextCheckpointIndex < checkpoints.Count)
-                {
-                    Gizmos.color = Color.green;
-                    Vector3 checkpointPos = checkpoints[nextCheckpointIndex].transform.position;
-                    Gizmos.DrawLine(transform.position, checkpointPos);
-                    Gizmos.DrawWireSphere(checkpointPos, 2.0f);
-                }
-            }
-        }
+        raycastOrigin = carBodyTransform;
+        Debug.Log($"Raycast origin set to {raycastOrigin.name}");
     }
 }
