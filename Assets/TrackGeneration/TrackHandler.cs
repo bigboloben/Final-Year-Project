@@ -106,20 +106,6 @@ namespace Assets.TrackGeneration
             //GenerateTrack(GenerationStrategy.GridWithNoise);
         }
 
-        private void OnSpacePerformed(InputAction.CallbackContext context)
-        {
-            GenerateTrack(GenerationStrategy.GridWithNoise);
-        }
-
-        private void OnShiftPerformed(InputAction.CallbackContext context)
-        {
-            GenerateTrack(GenerationStrategy.CircularLayout);
-        }
-
-        private void OnEnterPerformed(InputAction.CallbackContext context)
-        {
-            GenerateTrack(GenerationStrategy.Random);
-        }
         void Update()
         {
             UpdateCameraPosition();

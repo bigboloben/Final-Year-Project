@@ -63,6 +63,8 @@ public class CarAgent : Agent
     public float reversePenalty = -0.3f;
     [Tooltip("Bonus reward for efficient lap completion")]
     public float lapTimeBonus = 3.0f;
+    [Tooltip("Number of laps to complete before ending episode")]
+    public int lapsToCompleteBeforeReset;
 
     [Header("Training Parameters")]
     [Tooltip("Seconds before reset if no checkpoint is passed")]
@@ -240,6 +242,7 @@ public class CarAgent : Agent
 
             // Subscribe to checkpoint events
             raceManager.OnCheckpointPassed += OnRaceManagerCheckpointPassed;
+            lapsToCompleteBeforeReset = raceManager.totalLaps;
         }
 
         // Initialize memory variables
@@ -1693,6 +1696,18 @@ public class CarAgent : Agent
         if (enableCheckpointDebugging)
         {
             Debug.Log($"[Agent {gameObject.name}] Completed full lap in {lapTime:F2}s with efficiency {lapEfficiencyScore:F2}");
+        }
+
+        // NEW CODE: Check if we've completed enough laps to end the episode
+        if (currentLap >= lapsToCompleteBeforeReset)
+        {
+            if (enableResetReasonLogging)
+                Debug.Log($"[RESET] Car {gameObject.name} completed {currentLap} laps - ending episode");
+
+            lastResetReason = "Completed target number of laps";
+
+            // End the episode which will trigger OnEpisodeBegin() and increment the episode counter
+            EndEpisode();
         }
     }
 

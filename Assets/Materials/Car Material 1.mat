@@ -148,7 +148,7 @@ Material:
     - _Max: 1
     - _Max_Brightness: 1
     - _Metallic: 0
-    - _Min: 0.242
+    - _Min: 0.395
     - _Min_Brightness: 0.3
     - _NumberOfColors: 4
     - _Number_Of_Dots: 60
