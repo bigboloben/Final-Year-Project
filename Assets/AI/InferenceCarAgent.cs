@@ -24,6 +24,8 @@ public class InferenceCarAgent : Agent
     private float lastCheckpointTime;
     private int totalCheckpointsPassed = 0;
     private int currentLap = 0;
+    private bool hasCompletedFullCheckpointCircuit = false; // Track if we've gone through all checkpoints
+    private int lastPassedCheckpointIndex = -1; // Keep track of the last checkpoint passed
 
     [Header("Track Memory")]
     public bool useTrackMemory = true;
@@ -217,7 +219,15 @@ public class InferenceCarAgent : Agent
             bool isRaceActive = raceManager != null && raceManager.IsRaceActive();
             Debug.Log($"[Agent {gameObject.name}] Race active: {isRaceActive}, " +
                       $"Next checkpoint: {nextCheckpointIndex}, " +
+                      $"Last checkpoint: {lastPassedCheckpointIndex}, " +
+                      $"Full circuit: {hasCompletedFullCheckpointCircuit}, " +
                       $"Total passed: {totalCheckpointsPassed}");
+        }
+
+        // Periodically sync with RaceManager
+        if (raceManager != null && raceManager.IsRaceActive() && Time.frameCount % 30 == 0)
+        {
+            SyncCheckpointWithRaceManager();
         }
 
         // Safety check - if car falls below a certain height, reset position
@@ -229,6 +239,38 @@ public class InferenceCarAgent : Agent
 
         // Visualize agent perception
         VisualizeAgentPerception();
+    }
+
+    // Sync checkpoint data with RaceManager
+    private void SyncCheckpointWithRaceManager()
+    {
+        if (raceManager == null) return;
+
+        int raceManagerNextCheckpoint = raceManager.GetPlayerNextCheckpoint(gameObject);
+
+        if (nextCheckpointIndex != raceManagerNextCheckpoint)
+        {
+            if (isDebugLoggingEnabled)
+            {
+                Debug.Log($"[Agent {gameObject.name}] Syncing checkpoint index: {nextCheckpointIndex} -> {raceManagerNextCheckpoint}");
+            }
+
+            nextCheckpointIndex = raceManagerNextCheckpoint;
+            UpdateCheckpointInfo(); // Update direction ray
+
+            // Check if we're completing a lap (checkpoint 0 after completing circuit)
+            if (nextCheckpointIndex == 0 && hasCompletedFullCheckpointCircuit)
+            {
+                // Update our lap state to match RaceManager
+                hasCompletedFullCheckpointCircuit = false;
+                currentLap = raceManager.GetPlayerCurrentLap(gameObject);
+
+                if (isDebugLoggingEnabled)
+                {
+                    Debug.Log($"[Agent {gameObject.name}] Synced lap counter to {currentLap} from RaceManager");
+                }
+            }
+        }
     }
 
     // Action interpolation in FixedUpdate
@@ -557,6 +599,8 @@ public class InferenceCarAgent : Agent
         totalCheckpointsPassed = 0;
         currentLap = 0;
         lastCheckpointTime = Time.time;
+        hasCompletedFullCheckpointCircuit = false;
+        lastPassedCheckpointIndex = -1;
 
         // Initialize timers
         lastTrackMemoryUpdateTime = Time.time;
@@ -772,7 +816,39 @@ public class InferenceCarAgent : Agent
         {
             if (isDebugLoggingEnabled)
             {
-                Debug.Log($"[Agent {gameObject.name}] Checkpoint passed: {checkpointIndex}");
+                Debug.Log($"[Agent {gameObject.name}] Checkpoint passed: {checkpointIndex}, last: {lastPassedCheckpointIndex}, full_circuit: {hasCompletedFullCheckpointCircuit}");
+            }
+
+            // Update tracking variables
+            lastPassedCheckpointIndex = checkpointIndex;
+
+            // Special handling for checkpoint 0 (start/finish)
+            if (checkpointIndex == 0)
+            {
+                // If we've completed a full circuit
+                if (hasCompletedFullCheckpointCircuit)
+                {
+                    // This is a lap completion - checkpoint 0 after completing circuit
+                    currentLap++;
+
+                    if (isDebugLoggingEnabled)
+                    {
+                        Debug.Log($"[Agent {gameObject.name}] LAP COMPLETED at checkpoint 0 - now on lap {currentLap}");
+                    }
+
+                    // Reset the completed circuit flag
+                    hasCompletedFullCheckpointCircuit = false;
+                }
+            }
+
+            // Check if we've just passed the last checkpoint (which means we completed a circuit)
+            if (checkpointIndex == checkpoints.Count - 1)
+            {
+                hasCompletedFullCheckpointCircuit = true;
+                if (isDebugLoggingEnabled)
+                {
+                    Debug.Log($"[Agent {gameObject.name}] CIRCUIT COMPLETED at last checkpoint - next is 0");
+                }
             }
 
             // Get next expected checkpoint
@@ -784,16 +860,6 @@ public class InferenceCarAgent : Agent
             // Update timers and counters
             lastCheckpointTime = Time.time;
             totalCheckpointsPassed++;
-
-            // Check for lap completion - if we just hit the last checkpoint and next is 0
-            if (checkpointIndex == checkpoints.Count - 1 && nextCheckpointIndex == 0)
-            {
-                currentLap++;
-                if (isDebugLoggingEnabled)
-                {
-                    Debug.Log($"[Agent {gameObject.name}] Completed lap {currentLap}");
-                }
-            }
         }
     }
 

@@ -53,7 +53,7 @@ public class CarControlScript : MonoBehaviour
     private TrailRenderer[] trailRenderers = new TrailRenderer[2];
 
     [Header("Grip Settings")]
-    public float downforce = 60f;
+    private float downforce = 60f;
     public float sidewaysGripFactor = 2f;     // Resistance to sliding sideways
     public float forwardGripFactor = 1.5f;    // Forward/backward grip
     public float maxVelocity = 30f;           // Maximum speed

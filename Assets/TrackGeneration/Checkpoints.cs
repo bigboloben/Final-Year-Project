@@ -75,26 +75,56 @@ namespace Assets.TrackGeneration
             // Set the container to the Checkpoint layer as well
             checkpointsContainer.layer = Checkpoint.CheckpointLayer;
 
-            float increment = (float)(leftPoints.Length - 1) / (numberOfCheckpoints - 1);
+            // Create checkpoint 0 at the start/finish line (index 0)
+            GameObject startFinishCheckpoint = CreateCheckpointTrigger(leftPoints[0], rightPoints[0], checkpointHeight);
+            startFinishCheckpoint.name = "Checkpoint_0_StartFinish";
+            startFinishCheckpoint.transform.SetParent(checkpointsContainer.transform);
+            startFinishCheckpoint.layer = Checkpoint.CheckpointLayer;
+            Checkpoint checkpoint0 = startFinishCheckpoint.AddComponent<Checkpoint>();
+            checkpoints.Add(checkpoint0);
 
-            for (int i = 0; i < numberOfCheckpoints; i++)
+            // Calculate the remaining checkpoints between point 1 and the last point
+            // Ensure we don't overlap with the start/finish
+            if (numberOfCheckpoints > 1)
             {
-                int currentIndex = Mathf.Min(Mathf.RoundToInt(i * increment), leftPoints.Length - 1);
+                // We want to distribute the remaining checkpoints between index 1 and index (length-1)
+                // We're placing (numberOfCheckpoints-1) checkpoints in this range
+                float trackLength = leftPoints.Length - 1;
+                float spacing = trackLength / numberOfCheckpoints;
 
-                Vector3 leftPoint = leftPoints[currentIndex];
-                Vector3 rightPoint = rightPoints[currentIndex];
+                // Start from 1 since we already placed checkpoint 0
+                for (int i = 1; i < numberOfCheckpoints; i++)
+                {
+                    // Calculate position along the track, ensuring we don't place a checkpoint at position 0
+                    // This formula ensures checkpoints are evenly distributed between position 1 and position (length-1)
+                    float position = i * spacing;
+                    int pointIndex = Mathf.RoundToInt(position);
 
-                GameObject checkpointObject = CreateCheckpointTrigger(leftPoint, rightPoint, checkpointHeight);
-                checkpointObject.transform.SetParent(checkpointsContainer.transform);
+                    // Make sure we don't exceed array bounds
+                    pointIndex = Mathf.Clamp(pointIndex, 1, leftPoints.Length - 1);
 
-                // Set the checkpoint to the Checkpoint layer
-                checkpointObject.layer = Checkpoint.CheckpointLayer;
+                    Vector3 leftPoint = leftPoints[pointIndex];
+                    Vector3 rightPoint = rightPoints[pointIndex];
 
-                Checkpoint checkpoint = checkpointObject.AddComponent<Checkpoint>();
-                checkpoints.Add(checkpoint);
+                    GameObject checkpointObject = CreateCheckpointTrigger(leftPoint, rightPoint, checkpointHeight);
+                    checkpointObject.name = $"Checkpoint_{i}";
+                    checkpointObject.transform.SetParent(checkpointsContainer.transform);
+                    checkpointObject.layer = Checkpoint.CheckpointLayer;
+
+                    Checkpoint checkpointComponent = checkpointObject.AddComponent<Checkpoint>();
+                    checkpoints.Add(checkpointComponent);
+                }
             }
 
-            RaceManager.Instance.InitializeCheckpoints(checkpoints);
+            // Initialize checkpoints in RaceManager
+            if (RaceManager.Instance != null)
+            {
+                RaceManager.Instance.InitializeCheckpoints(checkpoints);
+            }
+            else
+            {
+                Debug.LogError("RaceManager.Instance is null! Cannot initialize checkpoints.");
+            }
 
             return checkpoints;
         }

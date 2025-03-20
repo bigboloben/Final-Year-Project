@@ -15,6 +15,7 @@ namespace Assets.TrackGeneration
         public bool hasFinishedRace = false;
         public float raceCompletionTime = 0f;
         public bool isAgent = false; // Flag to identify ML agents vs human players
+        public bool hasCompletedFullCheckpointCircuit = false; // Flag to track if player has gone through all checkpoints
     }
 
     public class RaceManager : MonoBehaviour
@@ -114,7 +115,8 @@ namespace Assets.TrackGeneration
                     playerName = playerName,
                     currentLap = 0,
                     nextCheckpointIndex = 0,
-                    isAgent = false
+                    isAgent = false,
+                    hasCompletedFullCheckpointCircuit = false
                 });
             }
         }
@@ -128,7 +130,8 @@ namespace Assets.TrackGeneration
                     playerName = agentName,
                     currentLap = 0,
                     nextCheckpointIndex = 0,
-                    isAgent = true
+                    isAgent = true,
+                    hasCompletedFullCheckpointCircuit = false
                 });
             }
         }
@@ -160,25 +163,27 @@ namespace Assets.TrackGeneration
             var stats = playerStats[player];
             int checkpointIndex = checkpoints.IndexOf(checkpoint);
 
+            // Checkpoint passed successfully
+            OnCheckpointPassed?.Invoke(player, checkpointIndex, checkpoints.Count);
+
             // Check if this is the expected checkpoint
             if (checkpointIndex == stats.nextCheckpointIndex)
             {
-                // Checkpoint passed successfully
-                OnCheckpointPassed?.Invoke(player, checkpointIndex, checkpoints.Count);
-
                 // Update next expected checkpoint
                 stats.nextCheckpointIndex = (checkpointIndex + 1) % checkpoints.Count;
 
-                // Check for lap completion
-                if (checkpointIndex == checkpoints.Count - 1)
+                // If this is checkpoint 0 and the player has completed a full circuit
+                if (checkpointIndex == 0 && stats.hasCompletedFullCheckpointCircuit)
                 {
                     CompletePlayerLap(player);
+                    stats.hasCompletedFullCheckpointCircuit = false; // Reset for next lap
                 }
-            }
-            else
-            {
-                // Wrong checkpoint
-                OnWrongCheckpoint?.Invoke(player, checkpointIndex, stats.nextCheckpointIndex);
+
+                // If this is the last checkpoint before checkpoint 0, mark as completed circuit
+                if (checkpointIndex == checkpoints.Count - 1)
+                {
+                    stats.hasCompletedFullCheckpointCircuit = true;
+                }
             }
         }
 
@@ -271,6 +276,7 @@ namespace Assets.TrackGeneration
             stats.lapTimes.Clear();
             stats.hasFinishedRace = false;
             stats.raceCompletionTime = 0f;
+            stats.hasCompletedFullCheckpointCircuit = false;
         }
 
         public void EndRace()
