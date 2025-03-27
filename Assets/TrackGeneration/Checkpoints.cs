@@ -37,13 +37,14 @@ namespace Assets.TrackGeneration
         public static List<Checkpoint> GenerateCheckpoints(
             Vector3[] leftPoints,
             Vector3[] rightPoints,
+            Vector3[] centerPoints, // Added center points array
             GameObject trackObject,
             int numberOfCheckpoints = 50,
             float checkpointHeight = 5f)
         {
-            if (leftPoints == null || rightPoints == null)
+            if (leftPoints == null || rightPoints == null || centerPoints == null)
             {
-                Debug.LogError("Left or right points array is null!");
+                Debug.LogError("Points array is null!");
                 return new List<Checkpoint>();
             }
 
@@ -59,48 +60,44 @@ namespace Assets.TrackGeneration
                 return new List<Checkpoint>();
             }
 
-            if (numberOfCheckpoints > leftPoints.Length)
-            {
-                Debug.LogWarning($"Requested {numberOfCheckpoints} checkpoints but only {leftPoints.Length} points available. Using maximum possible checkpoints.");
-                numberOfCheckpoints = leftPoints.Length;
-            }
-
             // Create Checkpoint layer if it doesn't exist
             CreateCheckpointLayerIfNeeded();
 
             List<Checkpoint> checkpoints = new List<Checkpoint>();
             GameObject checkpointsContainer = new GameObject("Checkpoints");
             checkpointsContainer.transform.SetParent(trackObject.transform);
-
-            // Set the container to the Checkpoint layer as well
             checkpointsContainer.layer = Checkpoint.CheckpointLayer;
 
-            // Create checkpoint 0 at the start/finish line (index 0)
-            GameObject startFinishCheckpoint = CreateCheckpointTrigger(leftPoints[0], rightPoints[0], checkpointHeight);
+            // SPECIAL HANDLING FOR CHECKPOINT 0 (START/FINISH)
+            // Get the center point at index 0
+            Vector3 startCenterDirection = (centerPoints[1] - centerPoints[centerPoints.Length - 1]).normalized;
+            Vector3 startCenterPoint = centerPoints[0] + startCenterDirection * 4f;
+
+            // Find the nearest left wall point to this center point
+            Vector3 startLeftPoint = FindNearestPoint(startCenterPoint, leftPoints);
+
+            // Find the nearest right wall point to this center point
+            Vector3 startRightPoint = FindNearestPoint(startCenterPoint, rightPoints);
+
+            // Create checkpoint 0 using these custom points
+            GameObject startFinishCheckpoint = CreateCheckpointTrigger(startLeftPoint, startRightPoint, checkpointHeight);
             startFinishCheckpoint.name = "Checkpoint_0_StartFinish";
             startFinishCheckpoint.transform.SetParent(checkpointsContainer.transform);
             startFinishCheckpoint.layer = Checkpoint.CheckpointLayer;
             Checkpoint checkpoint0 = startFinishCheckpoint.AddComponent<Checkpoint>();
             checkpoints.Add(checkpoint0);
 
-            // Calculate the remaining checkpoints between point 1 and the last point
-            // Ensure we don't overlap with the start/finish
+            // Calculate the remaining checkpoints using the original logic
             if (numberOfCheckpoints > 1)
             {
-                // We want to distribute the remaining checkpoints between index 1 and index (length-1)
-                // We're placing (numberOfCheckpoints-1) checkpoints in this range
                 float trackLength = leftPoints.Length - 1;
                 float spacing = trackLength / numberOfCheckpoints;
 
                 // Start from 1 since we already placed checkpoint 0
                 for (int i = 1; i < numberOfCheckpoints; i++)
                 {
-                    // Calculate position along the track, ensuring we don't place a checkpoint at position 0
-                    // This formula ensures checkpoints are evenly distributed between position 1 and position (length-1)
                     float position = i * spacing;
                     int pointIndex = Mathf.RoundToInt(position);
-
-                    // Make sure we don't exceed array bounds
                     pointIndex = Mathf.Clamp(pointIndex, 1, leftPoints.Length - 1);
 
                     Vector3 leftPoint = leftPoints[pointIndex];
@@ -123,10 +120,29 @@ namespace Assets.TrackGeneration
             }
             else
             {
-                Debug.LogError("RaceManager.Instance is null! Cannot initialize checkpoints.");
+                Debug.Log("RaceManager.Instance is null! Checkpoints were not registered.");
             }
 
             return checkpoints;
+        }
+
+        // Helper method to find the nearest point in an array
+        private static Vector3 FindNearestPoint(Vector3 targetPoint, Vector3[] points)
+        {
+            Vector3 nearestPoint = points[0];
+            float minDistance = Vector3.Distance(targetPoint, nearestPoint);
+
+            for (int i = 1; i < points.Length; i++)
+            {
+                float distance = Vector3.Distance(targetPoint, points[i]);
+                if (distance < minDistance)
+                {
+                    minDistance = distance;
+                    nearestPoint = points[i];
+                }
+            }
+
+            return nearestPoint;
         }
 
         private static GameObject CreateCheckpointTrigger(Vector3 leftPoint, Vector3 rightPoint, float height)

@@ -7,6 +7,7 @@ using Assets.TrackGeneration;
 using System;
 using System.Collections;
 using System.Linq;
+using System.Text;
 
 public class InferenceCarAgent : Agent
 {
@@ -18,14 +19,14 @@ public class InferenceCarAgent : Agent
 
     [Header("Checkpoint System")]
     private List<Checkpoint> checkpoints;
-    private int nextCheckpointIndex = 0;
     private float distanceToNextCheckpoint;
     private Vector3 directionToNextCheckpoint;
     private float lastCheckpointTime;
     private int totalCheckpointsPassed = 0;
-    private int currentLap = 0;
-    private bool hasCompletedFullCheckpointCircuit = false; // Track if we've gone through all checkpoints
-    private int lastPassedCheckpointIndex = -1; // Keep track of the last checkpoint passed
+
+    [Header("Checkpoint Debugging")]
+    public bool enableCheckpointDebugging = false;
+    private bool lastRaceActiveState = false;
 
     [Header("Track Memory")]
     public bool useTrackMemory = true;
@@ -42,6 +43,7 @@ public class InferenceCarAgent : Agent
     [Header("Debug")]
     [Tooltip("Visualize direction to next checkpoint")]
     public bool visualizeTargetDirection = true;
+    [Tooltip("Show debug messages")]
     public bool isDebugLoggingEnabled = false;
 
     [Header("Visualization")]
@@ -51,6 +53,21 @@ public class InferenceCarAgent : Agent
     public Color raySensorNoHitColor = Color.green;
     public float visualizationDuration = 0.1f;
 
+    // Safety reset
+    private float safetyResetHeight = -50f;
+
+    // Race debug timer
+    private float lastRaceDebugTime = 0f;
+
+    // Memory for observations
+    private Vector3 previousPosition;
+    private Vector3 previousForward;
+    private float[] previousRaySensorData = new float[0];
+
+    // For visualization
+    private float[] latestContinuousActions = new float[0];
+    private int[] latestDiscreteActions = new int[0];
+
     // Action interpolation system
     private float[] previousActions = new float[3]; // [accelerate, steer, brake]
     private float[] currentActions = new float[3];
@@ -59,24 +76,8 @@ public class InferenceCarAgent : Agent
     private float interpolationTime = 0f;
     private float decisionInterval = 0.1f; // Will be updated dynamically
 
-    // For visualization
-    private float[] latestContinuousActions = new float[0];
-    private int[] latestDiscreteActions = new int[0];
-
-    // Track state
-    private Vector3 previousPosition;
-    private Vector3 previousForward;
-    private float[] previousRaySensorData = new float[0];
-
     public void InitializeAgent()
     {
-        // Get references from scene if needed
-        if (trackHandler == null)
-            trackHandler = GetComponent<TrackHandler>();
-
-        if (raceManager == null)
-            raceManager = GetComponent<RaceManager>();
-
         // Make sure we have all the required components
         if (carController == null)
             carController = GetComponent<CarControlScript>();
@@ -111,12 +112,11 @@ public class InferenceCarAgent : Agent
         {
             // Explicitly register with RaceManager
             raceManager.RegisterAgent(gameObject, gameObject.name);
-
-            if (isDebugLoggingEnabled)
-                Debug.Log($"[Agent {gameObject.name}] Registered with RaceManager");
+            Debug.Log($"[Agent {gameObject.name}] Registered with RaceManager");
 
             // Subscribe to checkpoint events
             raceManager.OnCheckpointPassed += OnRaceManagerCheckpointPassed;
+            raceManager.OnWrongCheckpoint += OnRaceManagerWrongCheckpoint;
         }
 
         // Initialize memory variables
@@ -156,8 +156,7 @@ public class InferenceCarAgent : Agent
         var behaviorParams = GetComponent<Unity.MLAgents.Policies.BehaviorParameters>();
         if (behaviorParams != null)
         {
-
-            int expectedObservations = 40;
+            int expectedObservations = 52;
             if (behaviorParams.BrainParameters.VectorObservationSize != expectedObservations)
             {
                 Debug.Log($"Updating vector observation size from {behaviorParams.BrainParameters.VectorObservationSize} to {expectedObservations}");
@@ -207,34 +206,55 @@ public class InferenceCarAgent : Agent
             discoveredKnots[i] = false; // Start undiscovered
         }
 
-        if (isDebugLoggingEnabled)
-            Debug.Log($"Track memory initialized with {knotCount} knot points");
+        Debug.Log($"Track memory initialized with {knotCount} knot points");
     }
 
     void Update()
     {
-        // Periodically log race and checkpoint stats
-        if (isDebugLoggingEnabled && Time.frameCount % 300 == 0)
+        // Check and log race state changes
+        if (raceManager != null)
         {
-            bool isRaceActive = raceManager != null && raceManager.IsRaceActive();
-            Debug.Log($"[Agent {gameObject.name}] Race active: {isRaceActive}, " +
-                      $"Next checkpoint: {nextCheckpointIndex}, " +
-                      $"Last checkpoint: {lastPassedCheckpointIndex}, " +
-                      $"Full circuit: {hasCompletedFullCheckpointCircuit}, " +
-                      $"Total passed: {totalCheckpointsPassed}");
+            bool isRaceActive = raceManager.IsRaceActive();
+
+            // Log when race state changes
+            if (isRaceActive != lastRaceActiveState)
+            {
+                Debug.Log($"[Agent {gameObject.name}] Race active state changed: {lastRaceActiveState} -> {isRaceActive}");
+                lastRaceActiveState = isRaceActive;
+            }
+
+            // Periodically sync checkpoint data with RaceManager
+            if (isRaceActive && Time.frameCount % 30 == 0)
+            {
+                SyncCheckpointWithRaceManager();
+            }
+
+            // Periodically log race and checkpoint stats
+            if (Time.time > lastRaceDebugTime + 5f)
+            {
+                if (enableCheckpointDebugging)
+                {
+                    int nextCheckpointIndex = raceManager.GetPlayerNextCheckpoint(gameObject);
+                    int currentLap = raceManager.GetPlayerCurrentLap(gameObject);
+                    bool hasCompletedFullCircuit = raceManager.HasPlayerCompletedFullCircuit(gameObject);
+
+                    Debug.Log($"[Agent {gameObject.name}] Race active: {isRaceActive}, " +
+                              $"Next checkpoint: {nextCheckpointIndex}, " +
+                              $"Lap: {currentLap}, " +
+                              $"Full circuit: {hasCompletedFullCircuit}, " +
+                              $"Total passed: {raceManager.GetPlayerTotalCheckpointsPassed(gameObject)}");
+                }
+                lastRaceDebugTime = Time.time;
+            }
         }
 
-        // Periodically sync with RaceManager
-        if (raceManager != null && raceManager.IsRaceActive() && Time.frameCount % 30 == 0)
+        // Safety check - if car falls below a certain height, force a reset
+        if (transform.position.y < safetyResetHeight)
         {
-            SyncCheckpointWithRaceManager();
-        }
-
-        // Safety check - if car falls below a certain height, reset position
-        if (transform.position.y < -50f)
-        {
-            Debug.LogWarning($"[RESET] Car {gameObject.name} fell below safety height. Resetting position.");
+            Debug.LogWarning($"[RESET] Car {gameObject.name} fell below safety height ({safetyResetHeight}). Forcing reset.");
             ResetCar();
+            EndEpisode();
+            return;
         }
 
         // Visualize agent perception
@@ -246,31 +266,8 @@ public class InferenceCarAgent : Agent
     {
         if (raceManager == null) return;
 
-        int raceManagerNextCheckpoint = raceManager.GetPlayerNextCheckpoint(gameObject);
-
-        if (nextCheckpointIndex != raceManagerNextCheckpoint)
-        {
-            if (isDebugLoggingEnabled)
-            {
-                Debug.Log($"[Agent {gameObject.name}] Syncing checkpoint index: {nextCheckpointIndex} -> {raceManagerNextCheckpoint}");
-            }
-
-            nextCheckpointIndex = raceManagerNextCheckpoint;
-            UpdateCheckpointInfo(); // Update direction ray
-
-            // Check if we're completing a lap (checkpoint 0 after completing circuit)
-            if (nextCheckpointIndex == 0 && hasCompletedFullCheckpointCircuit)
-            {
-                // Update our lap state to match RaceManager
-                hasCompletedFullCheckpointCircuit = false;
-                currentLap = raceManager.GetPlayerCurrentLap(gameObject);
-
-                if (isDebugLoggingEnabled)
-                {
-                    Debug.Log($"[Agent {gameObject.name}] Synced lap counter to {currentLap} from RaceManager");
-                }
-            }
-        }
+        // Simply update our direction information - we'll get all state from RaceManager
+        UpdateCheckpointInfo();
     }
 
     // Action interpolation in FixedUpdate
@@ -317,9 +314,6 @@ public class InferenceCarAgent : Agent
             UpdateTrackMemory();
             lastTrackMemoryUpdateTime = Time.time;
         }
-
-        // Update checkpoint information
-        UpdateCheckpointInfo();
     }
 
     private void UpdateTrackMemory()
@@ -341,6 +335,7 @@ public class InferenceCarAgent : Agent
         }
     }
 
+    // Optimize FindClosestKnot to avoid checking every knot every time
     private int FindClosestKnot()
     {
         if (trackKnots == null) return -1;
@@ -398,63 +393,7 @@ public class InferenceCarAgent : Agent
         return closestIndex;
     }
 
-    private void VisualizeTrackKnots()
-    {
-        if (!useTrackMemory || !visualizeRaySensors || trackKnots == null) return;
-
-        int knotCount = trackKnots.Length;
-
-        // Draw lines between knots we've discovered
-        for (int i = 0; i < knotCount; i++)
-        {
-            if (discoveredKnots[i])
-            {
-                int nextIndex = (i + 1) % knotCount;
-                if (discoveredKnots[nextIndex])
-                {
-                    // Draw center line
-                    Debug.DrawLine(trackKnots[i], trackKnots[nextIndex], Color.yellow, 0.1f);
-
-                    // Draw wall lines
-                    Debug.DrawLine(leftWallKnots[i], leftWallKnots[nextIndex], Color.cyan, 0.1f);
-                    Debug.DrawLine(rightWallKnots[i], rightWallKnots[nextIndex], Color.cyan, 0.1f);
-
-                    // Draw track width
-                    Debug.DrawLine(leftWallKnots[i], rightWallKnots[i], Color.white, 0.1f);
-                }
-            }
-        }
-
-        // Highlight the closest knot
-        if (closestKnotIndex >= 0)
-        {
-            // Draw a strong red line from car to closest knot
-            Debug.DrawLine(transform.position, trackKnots[closestKnotIndex], Color.red, 0.1f);
-
-            // Draw a sphere at the closest knot position
-            Debug.DrawLine(trackKnots[closestKnotIndex], trackKnots[closestKnotIndex] + Vector3.up * 2f, Color.red, 0.1f);
-
-            // Highlight the look-ahead knots
-            for (int i = 1; i <= lookAheadCount; i++)
-            {
-                int knotIndex = (closestKnotIndex + i) % knotCount;
-                if (discoveredKnots[knotIndex])
-                {
-                    // Color gradient from green to blue for observation knots
-                    Color observationColor = Color.Lerp(Color.green, Color.blue, i / (float)lookAheadCount);
-
-                    // Draw a direct line from car to observation knot
-                    Debug.DrawLine(
-                        transform.position,
-                        trackKnots[knotIndex],
-                        observationColor,
-                        0.1f
-                    );
-                }
-            }
-        }
-    }
-
+    // Visualize ray sensors and agent intentions
     private void VisualizeAgentPerception()
     {
         if (!visualizeRaySensors && !visualizeActionIntentions)
@@ -518,20 +457,116 @@ public class InferenceCarAgent : Agent
         }
     }
 
+    // Add to your visualization method
+    private void VisualizeTrackKnots()
+    {
+        if (!useTrackMemory || !visualizeRaySensors || trackKnots == null) return;
+
+        int knotCount = trackKnots.Length;
+
+        // Draw lines between knots we've discovered
+        for (int i = 0; i < knotCount; i++)
+        {
+            if (discoveredKnots[i])
+            {
+                int nextIndex = (i + 1) % knotCount;
+                if (discoveredKnots[nextIndex])
+                {
+                    // Draw center line
+                    Debug.DrawLine(trackKnots[i], trackKnots[nextIndex], Color.yellow, 0.1f);
+
+                    // Draw wall lines
+                    Debug.DrawLine(leftWallKnots[i], leftWallKnots[nextIndex], Color.cyan, 0.1f);
+                    Debug.DrawLine(rightWallKnots[i], rightWallKnots[nextIndex], Color.cyan, 0.1f);
+
+                    // Draw track width
+                    Debug.DrawLine(leftWallKnots[i], rightWallKnots[i], Color.white, 0.1f);
+                }
+            }
+        }
+
+        // Highlight the closest knot
+        if (closestKnotIndex >= 0)
+        {
+            // Draw a strong red line from car to closest knot
+            Debug.DrawLine(transform.position, trackKnots[closestKnotIndex], Color.red, 0.1f);
+
+            // Draw a sphere at the closest knot position
+            Debug.DrawLine(trackKnots[closestKnotIndex], trackKnots[closestKnotIndex] + Vector3.up * 2f, Color.red, 0.1f);
+
+            // Highlight the look-ahead knots (these are exactly the knots used as observations)
+            for (int i = 1; i <= lookAheadCount; i++)
+            {
+                int knotIndex = (closestKnotIndex + i) % knotCount;
+                if (discoveredKnots[knotIndex])
+                {
+                    // Color gradient from green to blue for observation knots
+                    Color observationColor = Color.Lerp(Color.green, Color.blue, i / (float)lookAheadCount);
+
+                    // Draw a direct line from car to observation knot (these are the knots used in observations)
+                    Debug.DrawLine(
+                        transform.position,
+                        trackKnots[knotIndex],
+                        observationColor,
+                        0.1f
+                    );
+
+                    // Draw a vertical marker at each observation knot
+                    Debug.DrawLine(
+                        trackKnots[knotIndex],
+                        trackKnots[knotIndex] + Vector3.up * (3f - i * 0.5f), // Vary height based on look ahead index
+                        observationColor,
+                        0.1f
+                    );
+
+                    // Get track data for the knot
+                    Vector3 center = trackKnots[knotIndex];
+                    Vector3 leftPos = leftWallKnots[knotIndex];
+                    Vector3 rightPos = rightWallKnots[knotIndex];
+
+                    // Calculate track width and height difference
+                    float width = Vector3.Distance(leftPos, rightPos);
+                    float heightDiff = rightPos.y - leftPos.y;
+                    float bankAngle = Mathf.Atan2(heightDiff, width) * Mathf.Rad2Deg;
+
+                    // Draw track width at this observation knot
+                    Debug.DrawLine(leftPos, rightPos, observationColor, 0.1f);
+
+                    // Visualize the banking angle
+                    Vector3 bankingDirection = Quaternion.Euler(0, 0, bankAngle) * Vector3.up * 3f;
+                    Debug.DrawRay(center, bankingDirection, Color.magenta, 0.1f);
+
+                    // Calculate track direction to next knot
+                    int nextIndex = (knotIndex + 1) % knotCount;
+                    if (discoveredKnots[nextIndex])
+                    {
+                        Vector3 nextPos = trackKnots[nextIndex];
+                        Vector3 trackDirection = (nextPos - center).normalized * 5f;
+                        Debug.DrawRay(center, trackDirection, observationColor, 0.1f);
+                    }
+                }
+            }
+        }
+    }
+
+    // Update checkpoint information
     private void UpdateCheckpointInfo()
     {
         try
         {
-            if (checkpoints == null || checkpoints.Count == 0)
+            if (checkpoints == null || checkpoints.Count == 0 || raceManager == null)
             {
-                if (isDebugLoggingEnabled)
+                if (enableCheckpointDebugging)
                     Debug.LogWarning($"[Agent {gameObject.name}] UpdateCheckpointInfo: Checkpoints list is null or empty!");
                 return;
             }
 
-            if (nextCheckpointIndex < checkpoints.Count)
+            // Get next checkpoint index from RaceManager
+            int nextIndex = raceManager.GetPlayerNextCheckpoint(gameObject);
+
+            if (nextIndex < checkpoints.Count)
             {
-                Vector3 nextCheckpointPosition = checkpoints[nextCheckpointIndex].transform.position;
+                Vector3 nextCheckpointPosition = checkpoints[nextIndex].transform.position;
 
                 distanceToNextCheckpoint = Vector3.Distance(transform.position, nextCheckpointPosition);
                 directionToNextCheckpoint = nextCheckpointPosition - transform.position;
@@ -540,15 +575,17 @@ public class InferenceCarAgent : Agent
                 if (visualizeTargetDirection)
                 {
                     Debug.DrawLine(transform.position, nextCheckpointPosition, Color.green, 0.1f);
+
+                    if (enableCheckpointDebugging && Time.frameCount % 300 == 0)
+                    {
+                        Debug.Log($"[Agent {gameObject.name}] Drawing ray to checkpoint {nextIndex} at {nextCheckpointPosition}");
+                    }
                 }
             }
             else
             {
-                if (isDebugLoggingEnabled)
-                    Debug.LogError($"[Agent {gameObject.name}] Invalid nextCheckpointIndex: {nextCheckpointIndex} (max: {checkpoints.Count - 1})");
-
-                // Fix invalid index
-                nextCheckpointIndex = 0;
+                if (enableCheckpointDebugging)
+                    Debug.LogError($"[Agent {gameObject.name}] Invalid nextCheckpointIndex: {nextIndex} (max: {checkpoints.Count - 1})");
             }
         }
         catch (Exception e)
@@ -591,21 +628,26 @@ public class InferenceCarAgent : Agent
 
     public override void OnEpisodeBegin()
     {
-        // For inference, we'll just reset the car position
+        // Reset the car position and state
         ResetCar();
+        ForceCheckpointReset();
 
-        // Reset checkpoint tracking
-        nextCheckpointIndex = 0;
-        totalCheckpointsPassed = 0;
-        currentLap = 0;
+        // Initialize checkpoint tracking
+        if (trackHandler != null)
+        {
+            checkpoints = trackHandler.GetCheckpoints();
+        }
+
+        // Reset timers and state tracking
         lastCheckpointTime = Time.time;
-        hasCompletedFullCheckpointCircuit = false;
-        lastPassedCheckpointIndex = -1;
-
-        // Initialize timers
+        totalCheckpointsPassed = 0;
         lastTrackMemoryUpdateTime = Time.time;
 
-        // Reset action interpolation
+        // Reset memory variables
+        previousPosition = transform.position;
+        previousForward = transform.forward;
+
+        // Reset interpolation values
         interpolationTime = 0f;
         for (int i = 0; i < 3; i++)
         {
@@ -628,8 +670,37 @@ public class InferenceCarAgent : Agent
         UpdateCheckpointInfo();
     }
 
+    // Reset checkpoint state for new episode
+    private void ForceCheckpointReset()
+    {
+        // Reset related variables
+        lastCheckpointTime = Time.time;
+
+        // Tell RaceManager to reset this agent's checkpoint
+        if (raceManager != null)
+        {
+            try
+            {
+                raceManager.ResetAgent(gameObject);
+
+                // Update checkpoint info after reset
+                UpdateCheckpointInfo();
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"Failed to reset checkpoint in RaceManager: {e.Message}");
+            }
+        }
+    }
+
     public override void CollectObservations(VectorSensor sensor)
     {
+        // Make sure we have the latest checkpoint info
+        if (raceManager != null)
+        {
+            UpdateCheckpointInfo();
+        }
+
         // Make sure sensor system is initialized
         if (sensorSystem == null)
         {
@@ -785,7 +856,7 @@ public class InferenceCarAgent : Agent
                 Debug.LogWarning($"Expected 3 continuous actions, but got {actionBuffers.ContinuousActions.Length}");
             }
 
-            // Extract discrete action (handbrake)
+            // Extract discrete action (handbrake) and store for interpolation
             if (actionBuffers.DiscreteActions.Length > 0)
             {
                 previousHandbrake = currentHandbrake;
@@ -801,6 +872,14 @@ public class InferenceCarAgent : Agent
             {
                 decisionInterval = Time.fixedDeltaTime * decisionRequester.DecisionPeriod;
             }
+
+            // Make sure we're synchronized with RaceManager
+            if (raceManager != null && raceManager.IsRaceActive())
+            {
+                SyncCheckpointWithRaceManager();
+            }
+
+            UpdateCheckpointInfo();
         }
         catch (Exception ex)
         {
@@ -808,58 +887,50 @@ public class InferenceCarAgent : Agent
         }
     }
 
-    // Called when a checkpoint is passed
+    // Called when a checkpoint is passed - get event from RaceManager
     private void OnRaceManagerCheckpointPassed(GameObject player, int checkpointIndex, int totalCheckpoints)
     {
         // Only process events for this agent
-        if (player == this.gameObject)
+        if (player != this.gameObject) return;
+
+        if (enableCheckpointDebugging)
         {
-            if (isDebugLoggingEnabled)
-            {
-                Debug.Log($"[Agent {gameObject.name}] Checkpoint passed: {checkpointIndex}, last: {lastPassedCheckpointIndex}, full_circuit: {hasCompletedFullCheckpointCircuit}");
-            }
+            int expectedIndex = raceManager.GetPlayerNextCheckpoint(gameObject);
+            int currentLap = raceManager.GetPlayerCurrentLap(gameObject);
+            bool fullCircuit = raceManager.HasPlayerCompletedFullCircuit(gameObject);
 
-            // Update tracking variables
-            lastPassedCheckpointIndex = checkpointIndex;
+            Debug.Log($"[Agent {gameObject.name}] CHECKPOINT PASSED: index={checkpointIndex}, " +
+                      $"expected={expectedIndex}, " +
+                      $"lap={currentLap}, " +
+                      $"full_circuit={fullCircuit}");
+        }
 
-            // Special handling for checkpoint 0 (start/finish)
-            if (checkpointIndex == 0)
-            {
-                // If we've completed a full circuit
-                if (hasCompletedFullCheckpointCircuit)
-                {
-                    // This is a lap completion - checkpoint 0 after completing circuit
-                    currentLap++;
+        // Check if this was the correct checkpoint by comparing with expected next checkpoint
+        int expectedNextIndex = raceManager.GetPlayerNextCheckpoint(gameObject);
+        int previousIndex = (expectedNextIndex - 1 + checkpoints.Count) % checkpoints.Count;
 
-                    if (isDebugLoggingEnabled)
-                    {
-                        Debug.Log($"[Agent {gameObject.name}] LAP COMPLETED at checkpoint 0 - now on lap {currentLap}");
-                    }
-
-                    // Reset the completed circuit flag
-                    hasCompletedFullCheckpointCircuit = false;
-                }
-            }
-
-            // Check if we've just passed the last checkpoint (which means we completed a circuit)
-            if (checkpointIndex == checkpoints.Count - 1)
-            {
-                hasCompletedFullCheckpointCircuit = true;
-                if (isDebugLoggingEnabled)
-                {
-                    Debug.Log($"[Agent {gameObject.name}] CIRCUIT COMPLETED at last checkpoint - next is 0");
-                }
-            }
-
-            // Get next expected checkpoint
-            nextCheckpointIndex = (checkpointIndex + 1) % checkpoints.Count;
+        if (checkpointIndex == previousIndex)
+        {
+            // This was the expected checkpoint
+            totalCheckpointsPassed++;
 
             // Update direction info
             UpdateCheckpointInfo();
 
-            // Update timers and counters
+            // Update timers
             lastCheckpointTime = Time.time;
-            totalCheckpointsPassed++;
+        }
+    }
+
+    // Handle wrong checkpoint - new method
+    private void OnRaceManagerWrongCheckpoint(GameObject player, int attemptedCheckpoint, int expectedCheckpoint)
+    {
+        // Only process events for this agent
+        if (player != this.gameObject) return;
+
+        if (enableCheckpointDebugging)
+        {
+            Debug.LogWarning($"[Agent {gameObject.name}] WRONG CHECKPOINT: Attempted={attemptedCheckpoint}, Expected={expectedCheckpoint}");
         }
     }
 
@@ -888,6 +959,7 @@ public class InferenceCarAgent : Agent
         if (raceManager != null)
         {
             raceManager.OnCheckpointPassed -= OnRaceManagerCheckpointPassed;
+            raceManager.OnWrongCheckpoint -= OnRaceManagerWrongCheckpoint;
         }
     }
 
@@ -897,6 +969,7 @@ public class InferenceCarAgent : Agent
         if (raceManager != null)
         {
             raceManager.OnCheckpointPassed -= OnRaceManagerCheckpointPassed;
+            raceManager.OnWrongCheckpoint -= OnRaceManagerWrongCheckpoint;
         }
     }
 }

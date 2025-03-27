@@ -86,6 +86,7 @@
     <Compile Include="Assets\TrackGeneration\Spline Processor.cs" />
     <Compile Include="Assets\Samples\Universal RP\17.0.3\URP RenderGraph Samples\RendererList\RendererListRenderFeature.cs" />
     <Compile Include="Assets\TrackGeneration\SplineSampling.cs" />
+    <Compile Include="Assets\TrackGeneration\TrackGenerationParameters.cs" />
     <Compile Include="Assets\Samples\Universal RP\17.0.3\URP RenderGraph Samples\FramebufferFetch\FrameBufferFetchRenderFeature.cs" />
     <Compile Include="Assets\TrackGeneration\RaceUI.cs" />
     <Compile Include="Assets\TrackGeneration\Cycle.cs" />

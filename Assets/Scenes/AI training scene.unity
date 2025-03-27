@@ -276,7 +276,7 @@ MonoBehaviour:
   - {fileID: 6674457689556500837, guid: f347242efacec8042a7e9d539c027c76, type: 3}
   - {fileID: 6674457689556500837, guid: 4e6184ca7fcd3ba47ad7e3a0e6249f26, type: 3}
   - {fileID: 6674457689556500837, guid: 05733a803570b6f44a6abc31c1928771, type: 3}
-  numberOfAgents: 1
+  numberOfAgents: 5
   agentSpacing: 0
   trackHandler: {fileID: 0}
   raceManager: {fileID: 0}

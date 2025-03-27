@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
@@ -10,18 +9,15 @@ namespace Assets.TrackGeneration
         private List<Triangle> delaunayTriangles;
         private List<VoronoiCell> cells;
         private List<Edge> voronoiEdges;
-        private const float IDEAL_TRACK_LENGTH = 1200f;
-        private const float MIN_STRAIGHT_LENGTH = 50f;
-        private const float MAX_STRAIGHT_LENGTH = 80f;
-        private const float MIN_SAFE_DISTANCE = 40f;
-        private const float CRITICAL_DISTANCE = 30f;
-        private const int DESIRED_CORNERS = 8;
+        private TrackGenerationParameters parameters;
 
-        public VoronoiDiagram(DelaunayTriangulation delaunay, List<Triangle> triangles)
+        public VoronoiDiagram(DelaunayTriangulation delaunay, List<Triangle> triangles,
+                             TrackGenerationParameters parameters = null)
         {
-            delaunayTriangles = triangles;
-            cells = new List<VoronoiCell>();
-            voronoiEdges = new List<Edge>();
+            this.delaunayTriangles = triangles;
+            this.cells = new List<VoronoiCell>();
+            this.voronoiEdges = new List<Edge>();
+            this.parameters = parameters ?? new TrackGenerationParameters();
             GenerateVoronoiCells();
         }
 
@@ -58,72 +54,36 @@ namespace Assets.TrackGeneration
             float lengthQuality = EvaluateLength(CalculatePathLength(trackPoints));
             float proximityQuality = EvaluateTrackProximity(trackPoints);
 
-            return (cornerQuality * 0.25f +
-                    straightQuality * 0.1f +
-                    flowQuality * 0.1f +
-                    layoutQuality * 0.1f +
-                    lengthQuality * 0.25f +
-                    proximityQuality * 0.2f);
-        }
 
-        private float EvaluateTrackProximity(List<Vector2> points)
-        {
-            float minDistance = float.MaxValue;
-
-            for (int i = 0; i < points.Count; i++)
-            {
-                Vector2 start1 = points[i];
-                Vector2 end1 = points[(i + 1) % points.Count];
-
-                for (int j = i + 2; j < points.Count; j++)
-                {
-                    if (j == i + 1 || (i == 0 && j == points.Count - 1)) continue;
-
-                    Vector2 start2 = points[j];
-                    Vector2 end2 = points[(j + 1) % points.Count];
-
-                    float distance = MinimumDistanceBetweenSegments(start1, end1, start2, end2);
-                    minDistance = Mathf.Min(minDistance, distance);
-                }
-            }
-
-            if (minDistance >= MIN_SAFE_DISTANCE)
-                return 1.0f;
-
-            if (minDistance <= CRITICAL_DISTANCE)
-                return 0.0f;
-
-            return (minDistance - CRITICAL_DISTANCE) / (MIN_SAFE_DISTANCE - CRITICAL_DISTANCE);
-        }
-
-        private float MinimumDistanceBetweenSegments(Vector2 start1, Vector2 end1, Vector2 start2, Vector2 end2)
-        {
-            float dist1 = DistanceFromPointToSegment(start1, start2, end2);
-            float dist2 = DistanceFromPointToSegment(end1, start2, end2);
-            float dist3 = DistanceFromPointToSegment(start2, start1, end1);
-            float dist4 = DistanceFromPointToSegment(end2, start1, end1);
-
-            return Mathf.Min(Mathf.Min(dist1, dist2), Mathf.Min(dist3, dist4));
+            // Apply parameterized weights
+            return (cornerQuality * parameters.CornerQualityWeight +
+                    straightQuality * parameters.StraightQualityWeight +
+                    flowQuality * parameters.FlowQualityWeight +
+                    layoutQuality * parameters.LayoutQualityWeight +
+                    lengthQuality * parameters.LengthQualityWeight +
+                    proximityQuality * parameters.ProximityQualityWeight);
         }
 
         private float EvaluateCorners(List<Vector2> points)
         {
-            const float TOO_SHARP_CORNER = 25f;
-            const float SHARP_CORNER = 45f;
-            const float MEDIUM_CORNER = 90f;
-            const float WIDE_CORNER = 120f;
+            // Use parameterized values instead of constants
+            float tooSharpCorner = parameters.TooSharpCornerAngle;
+            float sharpCorner = parameters.SharpCornerAngle;
+            float mediumCorner = parameters.MediumCornerAngle;
+            float wideCorner = parameters.WideCornerAngle;
+            int desiredCorners = parameters.DesiredCornersCount;
 
-            float[] desiredAngles = new float[] { SHARP_CORNER, MEDIUM_CORNER, WIDE_CORNER };
+            float[] desiredAngles = new float[] { sharpCorner, mediumCorner, wideCorner };
             int cornersCount = 0;
             float totalCornerQuality = 0;
 
             Dictionary<string, int> cornerTypes = new Dictionary<string, int>
-        {
-            {"too_sharp", 0},
-            {"sharp", 0},
-            {"medium", 0},
-            {"wide", 0}
-        };
+            {
+                {"too_sharp", 0},
+                {"sharp", 0},
+                {"medium", 0},
+                {"wide", 0}
+            };
 
             for (int i = 0; i < points.Count; i++)
             {
@@ -136,15 +96,15 @@ namespace Assets.TrackGeneration
                 {
                     cornersCount++;
 
-                    if (angle < TOO_SHARP_CORNER)
+                    if (angle < tooSharpCorner)
                     {
                         cornerTypes["too_sharp"]++;
                         totalCornerQuality += 0.2f;
                     }
                     else
                     {
-                        if (angle < SHARP_CORNER) cornerTypes["sharp"]++;
-                        else if (angle < MEDIUM_CORNER) cornerTypes["medium"]++;
+                        if (angle < sharpCorner) cornerTypes["sharp"]++;
+                        else if (angle < mediumCorner) cornerTypes["medium"]++;
                         else cornerTypes["wide"]++;
 
                         float bestAngleMatch = desiredAngles.Min(a => Mathf.Abs(angle - a));
@@ -158,7 +118,7 @@ namespace Assets.TrackGeneration
                 Mathf.Max(0, 1 - (cornerTypes["too_sharp"]) * 2f) : 1.0f;
 
             float varietyScore = cornerTypes.Where(kvp => kvp.Key != "too_sharp" && kvp.Value > 0).Count() / 3.0f;
-            float cornerCountQuality = 1.0f - Mathf.Abs(cornersCount - DESIRED_CORNERS) / DESIRED_CORNERS;
+            float cornerCountQuality = 1.0f - Mathf.Min(1, Mathf.Abs(cornersCount - desiredCorners) / (float)desiredCorners);
 
             return (cornerCountQuality * 0.4f +
                     (cornersCount > 0 ? totalCornerQuality / cornersCount : 0) * 0.3f +
@@ -188,27 +148,27 @@ namespace Assets.TrackGeneration
             }
 
             float lengthPenalty = 1.0f;
-            if (longestStraight > MAX_STRAIGHT_LENGTH)
+            if (longestStraight > parameters.MaxStraightLength)
             {
-                lengthPenalty = Mathf.Max(0, 1 - (longestStraight - MAX_STRAIGHT_LENGTH) / MAX_STRAIGHT_LENGTH);
+                lengthPenalty = Mathf.Max(0, 1 - (longestStraight - parameters.MaxStraightLength) / parameters.MaxStraightLength);
             }
 
-            float straightCountQuality = Mathf.Min(straightCount / 3.0f, 1.0f);
+            float straightCountQuality = Mathf.Min(straightCount / (float)parameters.DesiredStraightCount, 1.0f);
 
             float straightLengthQuality = 0;
             foreach (float length in straightLengths)
             {
-                if (length >= MIN_STRAIGHT_LENGTH && length <= MAX_STRAIGHT_LENGTH)
+                if (length >= parameters.MinStraightLength && length <= parameters.MaxStraightLength)
                 {
                     straightLengthQuality += 1.0f;
                 }
-                else if (length < MIN_STRAIGHT_LENGTH)
+                else if (length < parameters.MinStraightLength)
                 {
-                    straightLengthQuality += length / MIN_STRAIGHT_LENGTH;
+                    straightLengthQuality += length / parameters.MinStraightLength;
                 }
                 else
                 {
-                    straightLengthQuality += MAX_STRAIGHT_LENGTH / length;
+                    straightLengthQuality += parameters.MaxStraightLength / length;
                 }
             }
             straightLengthQuality = straightLengths.Count > 0 ? straightLengthQuality / straightLengths.Count : 0;
@@ -281,37 +241,55 @@ namespace Assets.TrackGeneration
 
         private float EvaluateLength(float length)
         {
-            return 1.0f - Mathf.Abs(length - IDEAL_TRACK_LENGTH) / IDEAL_TRACK_LENGTH;
+            // Use parameterized ideal length
+            if (length < parameters.MinTrackLength)
+                return length / parameters.MinTrackLength;
+            else if (length > parameters.MaxTrackLength)
+                return parameters.MaxTrackLength / length;
+            else
+                return 1.0f - Mathf.Abs(length - parameters.IdealTrackLength) /
+                    (parameters.MaxTrackLength - parameters.MinTrackLength);
         }
 
-        private float CalculateAngle(Vector2 p1, Vector2 p2, Vector2 p3)
+        private float EvaluateTrackProximity(List<Vector2> points)
         {
-            Vector2 v1 = p1 - p2;
-            Vector2 v2 = p3 - p2;
+            float minDistance = float.MaxValue;
 
-            v1.Normalize();
-            v2.Normalize();
-
-            float dot = Mathf.Clamp(Vector2.Dot(v1, v2), -1f, 1f);
-            return Mathf.Acos(dot) * Mathf.Rad2Deg;
-        }
-
-        public List<Edge> GetVoronoiEdges()
-        {
-            return voronoiEdges;
-        }
-
-        public Cycle SortCycles(List<Cycle> cycles)
-        {
-            Cycle bestTrack = cycles
-                .OrderByDescending(cycle => CalculateTrackQuality(cycle.Points))
-                .FirstOrDefault();
-            if (bestTrack == null)
+            for (int i = 0; i < points.Count; i++)
             {
-                Debug.LogError("No Tracks To Select");
+                Vector2 start1 = points[i];
+                Vector2 end1 = points[(i + 1) % points.Count];
+
+                for (int j = i + 2; j < points.Count; j++)
+                {
+                    if (j == i + 1 || (i == 0 && j == points.Count - 1)) continue;
+
+                    Vector2 start2 = points[j];
+                    Vector2 end2 = points[(j + 1) % points.Count];
+
+                    float distance = MinimumDistanceBetweenSegments(start1, end1, start2, end2);
+                    minDistance = Mathf.Min(minDistance, distance);
+                }
             }
 
-            return bestTrack;
+            if (minDistance >= parameters.MinSafeDistance)
+                return 1.0f;
+
+            if (minDistance <= parameters.CriticalDistance)
+                return 0.0f;
+
+            return (minDistance - parameters.CriticalDistance) /
+                   (parameters.MinSafeDistance - parameters.CriticalDistance);
+        }
+
+        private float MinimumDistanceBetweenSegments(Vector2 start1, Vector2 end1, Vector2 start2, Vector2 end2)
+        {
+            float dist1 = DistanceFromPointToSegment(start1, start2, end2);
+            float dist2 = DistanceFromPointToSegment(end1, start2, end2);
+            float dist3 = DistanceFromPointToSegment(start2, start1, end1);
+            float dist4 = DistanceFromPointToSegment(end2, start1, end1);
+
+            return Mathf.Min(Mathf.Min(dist1, dist2), Mathf.Min(dist3, dist4));
         }
 
         private float DistanceFromPointToSegment(Vector2 point, Vector2 lineStart, Vector2 lineEnd)
@@ -332,6 +310,139 @@ namespace Assets.TrackGeneration
             );
 
             return Vector2.Distance(point, projection);
+        }
+
+        public List<Edge> GetVoronoiEdges()
+        {
+            return voronoiEdges;
+        }
+
+        public Cycle SortCycles(List<Cycle> cycles)
+        {
+            Cycle bestTrack = cycles
+                .OrderByDescending(cycle => CalculateTrackQuality(cycle.Points))
+                .FirstOrDefault();
+
+            return bestTrack;
+        }
+
+        private float CalculateAngle(Vector2 p1, Vector2 p2, Vector2 p3)
+        {
+            Vector2 v1 = p1 - p2;
+            Vector2 v2 = p3 - p2;
+
+            v1.Normalize();
+            v2.Normalize();
+
+            float dot = Mathf.Clamp(Vector2.Dot(v1, v2), -1f, 1f);
+            return Mathf.Acos(dot) * Mathf.Rad2Deg;
+        }
+
+        // Track optimization methods
+        public Cycle OptimizeTrack(Cycle track)
+        {
+            if (track == null || track.Points.Count < 10) return track;
+
+            Cycle optimizedTrack = new Cycle(new List<Vector2>(track.Points));
+
+            optimizedTrack = SmoothSharpCorners(optimizedTrack);
+            optimizedTrack = FixTightSections(optimizedTrack);
+            optimizedTrack = OptimizeStraights(optimizedTrack);
+
+            return optimizedTrack;
+        }
+
+        private Cycle SmoothSharpCorners(Cycle track)
+        {
+            List<Vector2> points = track.Points;
+            List<Vector2> smoothedPoints = new List<Vector2>(points);
+
+            for (int i = 0; i < points.Count; i++)
+            {
+                Vector2 prev = points[(i - 1 + points.Count) % points.Count];
+                Vector2 current = points[i];
+                Vector2 next = points[(i + 1) % points.Count];
+
+                float angle = CalculateAngle(prev, current, next);
+
+                // Apply stronger smoothing to sharper corners
+                if (angle < parameters.TooSharpCornerAngle * 1.2f) // Add a small margin
+                {
+                    // Calculate smoothed position
+                    Vector2 target = (prev + next) / 2;
+                    float smoothFactor = Mathf.Lerp(0.5f, 0.2f, angle / parameters.TooSharpCornerAngle);
+                    smoothedPoints[i] = Vector2.Lerp(current, target, smoothFactor);
+                }
+            }
+
+            return new Cycle(smoothedPoints);
+        }
+
+        private Cycle OptimizeStraights(Cycle track)
+        {
+            List<Vector2> points = track.Points;
+            bool[] isStraight = new bool[points.Count];
+
+            // Identify straight sections
+            for (int i = 0; i < points.Count; i++)
+            {
+                Vector2 prev = points[(i - 1 + points.Count) % points.Count];
+                Vector2 current = points[i];
+                Vector2 next = points[(i + 1) % points.Count];
+
+                float angle = CalculateAngle(prev, current, next);
+                isStraight[i] = angle > 160f; // Very straight section
+            }
+
+            // Optimize straight sections by removing redundant points
+            List<Vector2> optimized = new List<Vector2>();
+            for (int i = 0; i < points.Count; i++)
+            {
+                if (!isStraight[i] || !isStraight[(i + 1) % points.Count] || i % 2 == 0)
+                {
+                    optimized.Add(points[i]);
+                }
+            }
+
+            // Only use optimized points if we didn't remove too many
+            if (optimized.Count >= points.Count * 0.7f)
+            {
+                return new Cycle(optimized);
+            }
+
+            return track;
+        }
+
+        private Cycle FixTightSections(Cycle track)
+        {
+            List<Vector2> points = track.Points;
+            List<Vector2> fixed_points = new List<Vector2>(points);
+
+            // Identify and fix sections that are too close to each other
+            for (int i = 0; i < points.Count; i++)
+            {
+                for (int j = i + 2; j < points.Count; j++)
+                {
+                    if (j == i + 1 || (i == 0 && j == points.Count - 1)) continue;
+
+                    Vector2 pointI = points[i];
+                    Vector2 pointJ = points[j];
+                    float distance = Vector2.Distance(pointI, pointJ);
+
+                    if (distance < parameters.MinSafeDistance)
+                    {
+                        // Calculate repulsion vector
+                        Vector2 repulsion = (pointI - pointJ).normalized;
+                        float strength = (parameters.MinSafeDistance - distance) * 0.25f;
+
+                        // Apply repulsion
+                        fixed_points[i] += repulsion * strength;
+                        fixed_points[j] -= repulsion * strength;
+                    }
+                }
+            }
+
+            return new Cycle(fixed_points);
         }
     }
 }

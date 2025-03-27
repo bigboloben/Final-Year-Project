@@ -12,13 +12,9 @@ namespace Assets.TrackGeneration
     {
         private CarControls controls;
 
-
-        //[Header("Track Segment Settings")]
-        //public GameObject trackSegmentPrefab;
-        //private GameObject trackSegments;
-
-        public int PointCount = 150;
-        public int CanvasSize = 1000;
+        [Header("Track Generation Settings")]
+        public TrackGenerationParameters trackGenParam = new TrackGenerationParameters();
+        public bool optimiseTrack = false;
 
         private List<Vector2> points;
         private Graph graph;
@@ -156,15 +152,16 @@ namespace Assets.TrackGeneration
 
             GeneratePoints(generation);
 
-            heights = GenerateSmoothArray(points.Count);
+            heights = GenerateSmoothArray(points.Count, trackGenParam.MinHeight, trackGenParam.MaxHeight);
 
             delaunayTriangulation = new DelaunayTriangulation(points);
             graph = delaunayTriangulation.Compute();
-            graph.RemoveOutOfBounds(CanvasSize);
+            graph.RemoveOutOfBounds(trackGenParam.CanvasSize);
             cycles = graph.FindAllCycles();
 
-            voronoi = new VoronoiDiagram(delaunayTriangulation, delaunayTriangulation.GetTriangles());
+            voronoi = new VoronoiDiagram(delaunayTriangulation, delaunayTriangulation.GetTriangles(), trackGenParam);
             cycle = voronoi.SortCycles(cycles);
+            if (optimiseTrack) cycle = voronoi.OptimizeTrack(cycle);
             cycle.FindLongestSegmentAndSetStart();
 
             splineObject = new GameObject($"Track Spline");
@@ -235,8 +232,8 @@ namespace Assets.TrackGeneration
 
         private void GeneratePoints(GenerationStrategy generationStrategy)
         {
-            PointGenerator gen = new PointGenerator(CanvasSize);
-            points = gen.GeneratePoints(PointCount, generationStrategy);
+            PointGenerator gen = new PointGenerator(trackGenParam.CanvasSize);
+            points = gen.GeneratePoints(trackGenParam.PointCount, generationStrategy);
         }
 
 
@@ -247,8 +244,8 @@ namespace Assets.TrackGeneration
 
         private bool IsPointInBounds(Vector2 point)
         {
-            return point.x >= -10 && point.x <= CanvasSize + 10 &&
-                   point.y >= -10 && point.y <= CanvasSize + 10;
+            return point.x >= -10 && point.x <= trackGenParam.CanvasSize + 10 &&
+                   point.y >= -10 && point.y <= trackGenParam.CanvasSize + 10;
         }
 
         //private void CreateTrackMesh()
@@ -376,6 +373,7 @@ namespace Assets.TrackGeneration
             checkpoints = CheckpointGenerator.GenerateCheckpoints(
                 leftPoints: trackMeshGenerator.splinePoints[0],
                 rightPoints: trackMeshGenerator.splinePoints[2],
+                centerPoints: trackMeshGenerator.splinePoints[1],
                 trackObject: trackMesh
             );
 

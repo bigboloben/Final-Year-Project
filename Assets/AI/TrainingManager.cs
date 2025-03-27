@@ -250,6 +250,29 @@ public class TrainingManager : MonoBehaviour
         yield return null;
 
         // Step 4: Generate initial track
+        if (trackHandler.trackGenParam == null)
+        {
+            trackHandler.trackGenParam = new TrackGenerationParameters();
+        }
+
+        TrackGenerationParameters param = trackHandler.trackGenParam;
+        // Point Generation
+        param.PointCount = 50;
+        // Track Geometry
+        param.IdealTrackLength = 1000f;
+        param.MinTrackLength = 900f;
+        param.MaxTrackLength = 1100f;
+        // Corner Parameters
+        param.DesiredCornersCount = 5;
+        param.MinCorners = 4;
+        param.MaxCorners = 6;
+        // Elevation Parameters
+        param.MaxHeight = 10f;
+        trackHandler.optimiseTrack = true;
+
+        Debug.Log($"[REBUILD] Randomized track parameters: Corners={param.DesiredCornersCount}, " +
+                  $"Length={param.IdealTrackLength}, MaxHeight={param.MaxHeight}, Optimised={trackHandler.optimiseTrack}");
+
         GenerateTrack();
         yield return new WaitForSeconds(0.2f); // Wait for track to be fully generated
 
@@ -302,8 +325,6 @@ public class TrainingManager : MonoBehaviour
         trackHandler.segments = segments;
         trackHandler.banking = banking;
         trackHandler.supportCount = supportCount;
-        trackHandler.PointCount = pointCount; 
-        trackHandler.CanvasSize = canvasSize;
 
         trackHandler.trackCamEnabled = true;
 
@@ -505,7 +526,7 @@ public class TrainingManager : MonoBehaviour
             carAgent.completedCheckpointsBeforeNewTrack = int.MaxValue;
 
             // Calculate total observations
-            int totalObservations = 40; 
+            int totalObservations = 52; 
 
             // Configure Behavior Parameters
             Unity.MLAgents.Policies.BehaviorParameters behaviorParams =
@@ -724,6 +745,52 @@ public class TrainingManager : MonoBehaviour
 
     // SECTION: Training Actions Implementation
 
+    private void RandomiseTrackParameters()
+    {
+        // Make sure trackHandler has TrackGenerationParameters
+        if (trackHandler.trackGenParam == null)
+        {
+            trackHandler.trackGenParam = new TrackGenerationParameters();
+        }
+
+        TrackGenerationParameters param = trackHandler.trackGenParam;
+
+        // Randomize track characteristics - adjust ranges as needed
+
+        // Point Generation
+        int[] pointCounts = new int[] { 50, 100, 150, 200 };
+        param.PointCount = pointCounts[UnityEngine.Random.Range(0, pointCounts.Length)];
+
+        // Track Geometry
+        
+        param.IdealTrackLength = UnityEngine.Random.Range(1000f, 1400f);
+        param.MinTrackLength = UnityEngine.Random.Range(param.IdealTrackLength - 200f, param.IdealTrackLength);
+        param.MaxTrackLength = UnityEngine.Random.Range(param.IdealTrackLength, param.IdealTrackLength + 200f);
+
+        // Corner Parameters
+        param.DesiredCornersCount = UnityEngine.Random.Range(6, 10);
+        param.MinCorners = param.DesiredCornersCount - 2;
+        param.MaxCorners = param.DesiredCornersCount + 2;
+
+
+        // Quality Weights - Modify these to emphasize different aspects
+        //param.CornerQualityWeight = UnityEngine.Random.Range(0.2f, 0.35f);
+        //param.StraightQualityWeight = UnityEngine.Random.Range(0.05f, 0.2f);
+        //param.FlowQualityWeight = UnityEngine.Random.Range(0.05f, 0.2f);
+        //param.LayoutQualityWeight = UnityEngine.Random.Range(0.05f, 0.15f);
+        //param.LengthQualityWeight = UnityEngine.Random.Range(0.2f, 0.3f);
+        //param.ProximityQualityWeight = UnityEngine.Random.Range(0.15f, 0.25f);
+
+        // Elevation Parameters
+        param.MaxHeight = UnityEngine.Random.Range(5f, 15f);
+
+        // Optionally enable/disable track optimization
+        trackHandler.optimiseTrack = UnityEngine.Random.value > 0.5f;
+
+        Debug.Log($"[REBUILD] Randomized track parameters: Corners={param.DesiredCornersCount}, " +
+                  $"Length={param.IdealTrackLength}, MaxHeight={param.MaxHeight}, Optimised={trackHandler.optimiseTrack}");
+    }
+
     // Perform a track rebuild and reset
     private IEnumerator PerformTrackRebuild()
     {
@@ -774,6 +841,7 @@ public class TrainingManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.1f); // Let physics settle
 
+        RandomiseTrackParameters();
         // Generate the new track
         if (isDebugLoggingEnabled) Debug.Log($"[REBUILD] Generating new track");
         GenerateTrack();
@@ -1022,34 +1090,34 @@ public class TrainingManager : MonoBehaviour
 
     // Reposition a single agent at the start position with offset
     // In TrainingManager.cs, modify RepositionAgent:
-    private void RepositionAgent(CarAgent agent, int index, bool randomize = false)
-    {
-        if (agent == null || agent.transform == null)
-            return;
+    //private void RepositionAgent(CarAgent agent, int index, bool randomize = false)
+    //{
+    //    if (agent == null || agent.transform == null)
+    //        return;
 
-        // Get the car controller component
-        CarControlScript carController = agent.GetComponent<CarControlScript>();
+    //    // Get the car controller component
+    //    CarControlScript carController = agent.GetComponent<CarControlScript>();
 
-        if (carController != null)
-        {
-            // Just use the car controller's reset method - this is much simpler
-            carController.ResetPosition();
+    //    if (carController != null)
+    //    {
+    //        // Just use the car controller's reset method - this is much simpler
+    //        carController.ResetPosition();
 
-            if (isDebugLoggingEnabled)
-                Debug.Log($"[REPOSITION] Agent {agent.gameObject.name} reset using car controller to rotation {agent.transform.rotation.eulerAngles}");
+    //        if (isDebugLoggingEnabled)
+    //            Debug.Log($"[REPOSITION] Agent {agent.gameObject.name} reset using car controller to rotation {agent.transform.rotation.eulerAngles}");
 
-            // Optional: Apply additional randomization if needed
-            if (randomize && startPositionRandomization > 0)
-            {
-                // Wait a frame for the reset to fully apply
-                //TODO: This may not be necessary
-            }
-        }
-        else
-        {
-            Debug.LogError($"Cannot reposition agent {agent.gameObject.name}: CarControlScript not found");
-        }
-    }
+    //        // Optional: Apply additional randomization if needed
+    //        if (randomize && startPositionRandomization > 0)
+    //        {
+    //            // Wait a frame for the reset to fully apply
+    //            //TODO: This may not be necessary
+    //        }
+    //    }
+    //    else
+    //    {
+    //        Debug.LogError($"Cannot reposition agent {agent.gameObject.name}: CarControlScript not found");
+    //    }
+    //}
 
     // SECTION: Trainer API and Utility Methods
 

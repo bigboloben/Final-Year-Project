@@ -136,6 +136,25 @@ namespace Assets.TrackGeneration
             }
         }
 
+        public bool HasPlayerCompletedFullCircuit(GameObject player)
+        {
+            if (!playerStats.ContainsKey(player)) return false;
+            return playerStats[player].hasCompletedFullCheckpointCircuit;
+        }
+
+        // Get player's total checkpoints passed
+        public int GetPlayerTotalCheckpointsPassed(GameObject player)
+        {
+            if (!playerStats.ContainsKey(player)) return 0;
+
+            // Calculate total based on laps and current checkpoint
+            int checkpointsPerLap = checkpoints.Count;
+            int completedLaps = playerStats[player].currentLap;
+            int currentLapCheckpoints = playerStats[player].nextCheckpointIndex;
+
+            return (completedLaps * checkpointsPerLap) + currentLapCheckpoints;
+        }
+
         // Check if we only have ML agents registered (for training)
         private bool HasAgentsOnly()
         {
@@ -163,7 +182,7 @@ namespace Assets.TrackGeneration
             var stats = playerStats[player];
             int checkpointIndex = checkpoints.IndexOf(checkpoint);
 
-            // Checkpoint passed successfully
+            // Always notify about checkpoint passing regardless of correctness
             OnCheckpointPassed?.Invoke(player, checkpointIndex, checkpoints.Count);
 
             // Check if this is the expected checkpoint
@@ -185,6 +204,11 @@ namespace Assets.TrackGeneration
                     stats.hasCompletedFullCheckpointCircuit = true;
                 }
             }
+            else
+            {
+                // Invoke wrong checkpoint event
+                OnWrongCheckpoint?.Invoke(player, checkpointIndex, stats.nextCheckpointIndex);
+            }
         }
 
         private void CompletePlayerLap(GameObject player)
@@ -203,7 +227,7 @@ namespace Assets.TrackGeneration
             // Reset for next lap
             stats.currentLapTime = 0f;
             stats.currentLap++;
-            stats.nextCheckpointIndex = 0;
+            stats.nextCheckpointIndex = 1;
 
             // Check if race is complete for this player
             if (stats.currentLap >= totalLaps)

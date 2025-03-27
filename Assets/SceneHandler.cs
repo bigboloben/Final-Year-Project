@@ -121,12 +121,23 @@ namespace Assets.TrackGeneration
             if (checkpoints != null && checkpoints.Count > 0)
             {
                 Debug.Log($"Found {checkpoints.Count} checkpoints");
-                raceSystem.InitializeCheckpoints(checkpoints);
-            }
-            else
-            {
-                Debug.LogError("No checkpoints found after track generation!");
-                yield break; // Stop if no checkpoints
+
+                // Only proceed with race initialization if both track and car are enabled
+                if (setupTrack && setupCar)
+                {
+                    if (raceSystem == null)
+                    {
+                        Debug.LogError("Race handler is null");
+                    }
+                    else
+                    {
+                        raceSystem.InitializeCheckpoints(checkpoints);
+                    }
+                }
+                else
+                {
+                    Debug.Log("Skipping race initialization since both track and car are not enabled");
+                }
             }
 
             // This is where your AI car setup should happen
@@ -135,34 +146,35 @@ namespace Assets.TrackGeneration
                 Debug.Log("About to set up car spawner...");
                 SetUpCarSpawner();
                 Debug.Log("Car spawner setup initiated"); // Add this to see if it gets here
-            }
 
-            // Wait for player car with timeout
-            float timeout = 0f;
-            float maxWait = 5f;
-            Debug.Log("Waiting for player car...");
-            while (playerCar == null && timeout < maxWait)
-            {
-                timeout += 0.2f;
-                Debug.Log($"Still waiting for player car... ({timeout}/{maxWait}s)");
+
+                // Wait for player car with timeout
+                float timeout = 0f;
+                float maxWait = 5f;
+                Debug.Log("Waiting for player car...");
+                while (playerCar == null && timeout < maxWait)
+                {
+                    timeout += 0.2f;
+                    Debug.Log($"Still waiting for player car... ({timeout}/{maxWait}s)");
+                    yield return new WaitForSeconds(0.2f);
+                }
+
+                if (playerCar == null)
+                {
+                    Debug.LogError("Player car not created within timeout period!");
+                    yield break;
+                }
+
+                Debug.Log("Player car is ready, initializing race system");
+                StartCoroutine(InitializeRaceSystem());
+
                 yield return new WaitForSeconds(0.2f);
-            }
 
-            if (playerCar == null)
-            {
-                Debug.LogError("Player car not created within timeout period!");
-                yield break;
-            }
-
-            Debug.Log("Player car is ready, initializing race system");
-            StartCoroutine(InitializeRaceSystem());
-
-            yield return new WaitForSeconds(0.2f);
-
-            if (setupTrack && setupCar)
-            {
-                Debug.Log("Setting up race UI");
-                SetupRaceUI();
+                if (setupTrack && setupCar)
+                {
+                    Debug.Log("Setting up race UI");
+                    SetupRaceUI();
+                }
             }
 
             Debug.Log("Scene initialization complete");
@@ -192,8 +204,6 @@ namespace Assets.TrackGeneration
             trackHandler.segments = segments;
             trackHandler.banking = banking;
             trackHandler.supportCount = supportCount;
-            trackHandler.PointCount = pointCount;
-            trackHandler.CanvasSize = canvasSize;
 
             // Create and setup camera
             GameObject cameraObj = new GameObject("Track Camera");
@@ -205,6 +215,10 @@ namespace Assets.TrackGeneration
 
             // Assign camera to track handler
             trackHandler.trackCamera = trackCamera;
+            if (!setupCar)
+            {
+                trackHandler.trackCamEnabled = true;
+            }
         }
 
         public void GenerateTrack()

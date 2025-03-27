@@ -63,7 +63,7 @@ public class CarControlScript : MonoBehaviour
 
     [Header("Drift Settings")]
     public bool isDrifting;
-    private float driftTime;
+    public float driftTime;
     private float currentBoostPower;
     private float driftDirection;
     public float driftGripFactor = 0.5f;      // Reduced grip during drift

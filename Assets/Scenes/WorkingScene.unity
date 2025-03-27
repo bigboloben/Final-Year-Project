@@ -396,16 +396,16 @@ MonoBehaviour:
   cameraRotationSpeed: 5
   cameraLookSensitivity: 100
   enableAICars: 0
-  aiModel: {fileID: 5022602860645237092, guid: 1495d2e59910dec46864ac7e4da9a980, type: 3}
+  aiModel: {fileID: 5022602860645237092, guid: 68157e96d0226eb44b6d26907ca068ec, type: 3}
   aiRayCount: 9
   aiRayAngle: 180
   aiSensorLength: 20
   aiLayerName: Agent
   totalLaps: 3
   countdownTime: 3
-  setupCar: 1
+  setupCar: 0
   setupTrack: 1
-  setupFloor: 1
+  setupFloor: 0
 --- !u!4 &1682255712
 Transform:
   m_ObjectHideFlags: 0
