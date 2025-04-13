@@ -1,13 +1,12 @@
-using UnityEngine;
-using Unity.MLAgents;
-using Unity.MLAgents.Sensors;
-using Unity.MLAgents.Actuators;
-using System.Collections.Generic;
 using Assets.TrackGeneration;
 using System;
-using System.Collections;
-using System.Text;
+using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using Unity.MLAgents;
+using Unity.MLAgents.Actuators;
+using Unity.MLAgents.Sensors;
+using UnityEngine;
 
 public class CarAgent : Agent
 {
@@ -53,8 +52,6 @@ public class CarAgent : Agent
     public float backwardsPenalty = -0.5f; // Increased from -0.1f
     [Tooltip("Penalty for not making progress")]
     public float noProgressPenalty = -0.05f; // Increased from -0.01f
-    [Tooltip("Penalty for jerky steering")]
-    public float jerkySteeringPenalty = -0.01f; // Slightly increased
     [Tooltip("Reward for facing the right direction")]
     public float directionAlignmentReward = 0.1f; // Increased from 0.05f
     [Tooltip("Penalty for using reverse")]
@@ -68,6 +65,22 @@ public class CarAgent : Agent
     [Tooltip("Penalty for failed drifts shorter than the lowest threshold")]
     public float failedDriftPenalty = -1.0f;
 
+    [Header("Arcade Drift Training")]
+    [Tooltip("Extra reward multiplier for tight corners successfully navigated with drift")]
+    public float tightCornerWithDriftMultiplier = 3.0f;
+    [Tooltip("Threshold angle change to consider a corner 'tight'")]
+    public float tightCornerThreshold = 35f;
+    [Tooltip("Reward for every second of successful drifting in tight corners")]
+    public float driftMaintenanceReward = 0.5f;
+    [Tooltip("Immediate reward for the correct TIMING of drift initiation")]
+    public float driftInitiationReward = 1.0f;
+    [Tooltip("Penalty for using drift when not needed (straight sections)")]
+    public float unnecessaryDriftPenalty = -0.5f;
+    [Tooltip("Penalty for failing to use drift in tight corners")]
+    public float missedDriftOpportunityPenalty = -0.3f;
+    [Tooltip("Reward for properly using drift exit boost")]
+    public float driftBoostUsageReward = 1.5f;
+
     [Header("Training Parameters")]
     [Tooltip("Seconds before reset if no checkpoint is passed")]
     public float maxTimeWithoutCheckpoint = 30f;
@@ -75,8 +88,6 @@ public class CarAgent : Agent
     public float maxEpisodeTime = 500f;
     [Tooltip("Threshold for detecting no progress")]
     public float noProgressThreshold = 0.5f;
-    [Tooltip("Flag to enable/disable reset on collision")]
-    public bool resetOnCollision = true;
     [Tooltip("Flag to reset when returning to a previous checkpoint")]
     public bool resetOnPreviousCheckpoint = true;
     [Tooltip("Minimum distance change to be considered progress")]
@@ -116,7 +127,6 @@ public class CarAgent : Agent
     private float episodeStartTime;
     private float lapStartTime;
     private float prevDistanceToCheckpoint; // Previous distance to next checkpoint (for progress calculation)
-    private Vector3 prevPosition;
     private TrainingManager trainingManager;
     private bool wasDrifting;
 
@@ -129,19 +139,8 @@ public class CarAgent : Agent
 
     // Advanced reward tracking
     private float prevSteer = 0f;
-    private bool isUsingHandbrake = false;
     private float totalDistanceTraveled = 0f;
-    private float straightLineDistanceToStart = 0f;
-    private float lapProgress = 0f;
-    private int currentLapCheckpoints = 0;
-    private float centerlineDeviation = 0f;
     private float lapEfficiencyScore = 1.0f;
-
-    // Recovery tracking
-    private bool isRecovering = false;
-    private Vector3 collisionPosition;
-    private float recoveryStartTime;
-    private float recoveryCheckTime = 2.0f;
 
     // Used to detect movement patterns
     private Vector3 lastPosition;
@@ -161,8 +160,6 @@ public class CarAgent : Agent
     private float lastRaceDebugTime = 0f;
 
     // Memory for observations
-    private Vector3 previousPosition;
-    private Vector3 previousForward;
     private float[] previousRaySensorData = new float[0]; // Will initialize properly in Start
 
     // For visualization
@@ -176,6 +173,17 @@ public class CarAgent : Agent
     private bool currentHandbrake = false;
     private float interpolationTime = 0f;
     private float decisionInterval = 0.1f; // Will be updated dynamically
+
+    // Drift training additions
+    private bool isInTightCorner = false;
+    private bool wasDriftUsedInCorner = false;
+    private float lastCornerAngleChange = 0f;
+    private float cornerEntryTime = 0f;
+    private float cornerExitTime = 0f;
+    private Vector3 previousForwardDirection;
+    private float timeSinceLastDriftCheck = 0f;
+    private bool hasPendingBoost = false;
+    private float boostStartTime = 0f;
 
     public override void Initialize()
     {
@@ -249,10 +257,6 @@ public class CarAgent : Agent
             lapsToCompleteBeforeReset = raceManager.totalLaps;
         }
 
-        // Initialize memory variables
-        previousPosition = transform.position;
-        previousForward = transform.forward;
-
         // Initialize ray history with proper size when sensor system is available
         if (sensorSystem != null)
         {
@@ -320,7 +324,7 @@ public class CarAgent : Agent
         if (behaviorParams != null)
         {
 
-            int expectedObservations = 52;
+            int expectedObservations = 60;
             if (behaviorParams.BrainParameters.VectorObservationSize != expectedObservations)
             {
                 Debug.Log($"Updating vector observation size from {behaviorParams.BrainParameters.VectorObservationSize} to {expectedObservations}");
@@ -513,6 +517,189 @@ public class CarAgent : Agent
             UpdateTrackMemory();
             lastTrackMemoryUpdateTime = Time.time;
         }
+
+        // Check for corner and drift opportunities
+        CheckCornerAndDriftOpportunities();
+    }
+
+    private void CheckCornerAndDriftOpportunities()
+    {
+        // Only check periodically to reduce computation
+        timeSinceLastDriftCheck += Time.fixedDeltaTime;
+        if (timeSinceLastDriftCheck < 0.1f) return;
+        timeSinceLastDriftCheck = 0f;
+
+        // Initialize previous direction on first call
+        if (previousForwardDirection == Vector3.zero)
+        {
+            previousForwardDirection = transform.forward;
+            return;
+        }
+
+        // Calculate angle change since last check
+        float angleChange = Vector3.Angle(previousForwardDirection, transform.forward);
+        previousForwardDirection = transform.forward;
+
+        // Track maximum angle change for corner detection
+        lastCornerAngleChange = Mathf.Max(lastCornerAngleChange, angleChange);
+
+        // Check if we're entering a tight corner
+        if (!isInTightCorner && angleChange > tightCornerThreshold)
+        {
+            isInTightCorner = true;
+            wasDriftUsedInCorner = false;
+            cornerEntryTime = Time.time;
+            lastCornerAngleChange = angleChange;
+
+            if (enableRewardLogging)
+                Debug.Log($"Entered tight corner with {angleChange}° turn");
+        }
+        // Check if we're exiting a corner
+        else if (isInTightCorner && angleChange < tightCornerThreshold * 0.3f &&
+                 Time.time - cornerEntryTime > 0.5f) // Minimum corner duration
+        {
+            isInTightCorner = false;
+            cornerExitTime = Time.time;
+
+            // Check if drift was used appropriately
+            if (!wasDriftUsedInCorner && lastCornerAngleChange > tightCornerThreshold)
+            {
+                // Penalize missing drift opportunity in a tight corner
+                AddTrackedReward(missedDriftOpportunityPenalty, "missed_drift_opportunity");
+
+                if (enableRewardLogging)
+                    Debug.Log($"Missed drift opportunity in {lastCornerAngleChange}° corner");
+            }
+
+            lastCornerAngleChange = 0f;
+        }
+
+        // Check for drift initiation timing
+        if (carController.isDrifting && !wasDriftUsedInCorner)
+        {
+            wasDriftUsedInCorner = true;
+
+            // Reward correct timing of drift initiation in corners
+            if (isInTightCorner)
+            {
+                float reward = driftInitiationReward * Mathf.Clamp01(lastCornerAngleChange / 90f);
+                AddTrackedReward(reward, "drift_initiation");
+
+                if (enableRewardLogging)
+                    Debug.Log($"Good drift initiation in {lastCornerAngleChange}° corner: +{reward:F2}");
+            }
+            else
+            {
+                // Penalize unnecessary drifting on straight sections
+                AddTrackedReward(unnecessaryDriftPenalty, "unnecessary_drift");
+
+                if (enableRewardLogging)
+                    Debug.Log("Unnecessary drift on straight section");
+            }
+        }
+
+        // Reward maintaining drift through corners
+        if (carController.isDrifting && isInTightCorner)
+        {
+            float driftReward = driftMaintenanceReward * Time.fixedDeltaTime *
+                               Mathf.Clamp01(lastCornerAngleChange / 90f);
+            AddTrackedReward(driftReward, "drift_maintenance");
+        }
+
+        // Detect boost usage after drift
+        if (!hasPendingBoost && carController.boostTimeRemaining > 0)
+        {
+            hasPendingBoost = true;
+            boostStartTime = Time.time;
+        }
+        else if (hasPendingBoost && carController.boostTimeRemaining <= 0)
+        {
+            hasPendingBoost = false;
+
+            // Reward effective boost usage
+            float boostDuration = Time.time - boostStartTime;
+            if (boostDuration > 0.5f) // Only reward substantial boost usage
+            {
+                float boostReward = driftBoostUsageReward * (boostDuration / carController.maxBoostTime);
+                AddTrackedReward(boostReward, "boost_usage");
+
+                if (enableRewardLogging)
+                    Debug.Log($"Effective boost usage for {boostDuration:F1}s: +{boostReward:F2}");
+            }
+        }
+    }
+
+    private float DetectUpcomingCornerAngle()
+    {
+        if (!useTrackMemory || trackKnots == null || closestKnotIndex < 0)
+            return 0f;
+
+        int knotCount = trackKnots.Length;
+        float maxAngleChange = 0f;
+
+        for (int i = 1; i < lookAheadCount - 1; i++)
+        {
+            int idx1 = (closestKnotIndex + i) % knotCount;
+            int idx2 = (closestKnotIndex + i + 1) % knotCount;
+            int idx3 = (closestKnotIndex + i + 2) % knotCount;
+
+            if (!discoveredKnots[idx1] || !discoveredKnots[idx2] || !discoveredKnots[idx3])
+                continue;
+
+            Vector3 segment1 = (trackKnots[idx2] - trackKnots[idx1]).normalized;
+            Vector3 segment2 = (trackKnots[idx3] - trackKnots[idx2]).normalized;
+
+            float angleChange = Vector3.Angle(segment1, segment2);
+            maxAngleChange = Mathf.Max(maxAngleChange, angleChange);
+        }
+
+        return maxAngleChange;
+    }
+
+    private float DetectDistanceToNextCorner()
+    {
+        if (!useTrackMemory || trackKnots == null || closestKnotIndex < 0)
+            return 30f;
+
+        int knotCount = trackKnots.Length;
+        float distance = 0f;
+
+        for (int i = 1; i < lookAheadCount + 5; i++)
+        {
+            int idx1 = (closestKnotIndex + i - 1) % knotCount;
+            int idx2 = (closestKnotIndex + i) % knotCount;
+            int idx3 = (closestKnotIndex + i + 1) % knotCount;
+
+            if (!discoveredKnots[idx1] || !discoveredKnots[idx2] || !discoveredKnots[idx3])
+                continue;
+
+            Vector3 segment1 = (trackKnots[idx2] - trackKnots[idx1]).normalized;
+            Vector3 segment2 = (trackKnots[idx3] - trackKnots[idx2]).normalized;
+
+            float angleChange = Vector3.Angle(segment1, segment2);
+
+            if (angleChange > tightCornerThreshold)
+            {
+                // Calculate distance to this corner
+                float totalDist = 0f;
+                Vector3 prevPos = transform.position;
+
+                for (int j = 0; j <= i; j++)
+                {
+                    int idx = (closestKnotIndex + j) % knotCount;
+                    if (!discoveredKnots[idx]) continue;
+
+                    totalDist += Vector3.Distance(prevPos, trackKnots[idx]);
+                    prevPos = trackKnots[idx];
+                }
+
+                return totalDist;
+            }
+
+            distance += Vector3.Distance(trackKnots[idx1], trackKnots[idx2]);
+        }
+
+        return 30f; // Default if no corner found
     }
 
     private void UpdateTrackMemory()
@@ -909,30 +1096,16 @@ public class CarAgent : Agent
             trainingManager.ReportAgentEpisodeCompleted(this, agentEpisodeCount);
         }
 
-        // Get hyperparameters from Academy if needed
-        maxTimeWithoutCheckpoint = Academy.Instance.EnvironmentParameters.GetWithDefault("max_time_without_checkpoint", maxTimeWithoutCheckpoint);
-        speedReward = Academy.Instance.EnvironmentParameters.GetWithDefault("speed_reward", speedReward);
-        checkpointReward = Academy.Instance.EnvironmentParameters.GetWithDefault("checkpoint_reward", checkpointReward);
-        backwardsPenalty = Academy.Instance.EnvironmentParameters.GetWithDefault("backwards_penalty", backwardsPenalty);
-        noProgressPenalty = Academy.Instance.EnvironmentParameters.GetWithDefault("no_progress_penalty", noProgressPenalty);
-        directionAlignmentReward = Academy.Instance.EnvironmentParameters.GetWithDefault("direction_alignment_reward", directionAlignmentReward);
-        collisionPenalty = Academy.Instance.EnvironmentParameters.GetWithDefault("collision_penalty", collisionPenalty);
-        noProgressThresholdTime = Academy.Instance.EnvironmentParameters.GetWithDefault("no_progress_threshold_time", noProgressThresholdTime);
-
-        // Log parameters for debugging
-        if (isDebugLoggingEnabled)
-        {
-            Debug.Log($"[PARAMS] Agent {gameObject.name} starting episode {agentEpisodeCount}, " +
-                     $"maxTimeWithoutCheckpoint: {maxTimeWithoutCheckpoint}, " +
-                     $"noProgressThresholdTime: {noProgressThresholdTime}");
-        }
-
         // Reset flags
         isWaitingForTrackRebuild = false;
         isReadyForRebuild = false;
-        isRecovering = false;
 
         wasDrifting = false;
+        isInTightCorner = false;
+        wasDriftUsedInCorner = false;
+        lastCornerAngleChange = 0f;
+        previousForwardDirection = Vector3.zero;
+        hasPendingBoost = false;
 
         // Reset reward tracking
         rewardComponents.Clear();
@@ -978,17 +1151,12 @@ public class CarAgent : Agent
         // Reset driving stats
         prevSteer = 0f;
         totalDistanceTraveled = 0f;
-        lapProgress = 0f;
-        currentLapCheckpoints = 0;
 
         // Clear position history
         positionHistory.Clear();
         lastPosition = transform.position;
         lastPositionHistoryTime = Time.time;
 
-        // Reset memory variables
-        previousPosition = transform.position;
-        previousForward = transform.forward;
 
         // Reset interpolation values
         interpolationTime = 0f;
@@ -1012,12 +1180,47 @@ public class CarAgent : Agent
         // Initial measurement to next checkpoint
         UpdateCheckpointInfo();
         prevDistanceToCheckpoint = distanceToNextCheckpoint;  // Set initial previous distance
-        prevPosition = transform.position;
 
-        // Calculate straight-line distance from start to first checkpoint (for efficiency scoring)
-        if (checkpoints != null && checkpoints.Count > 0)
+    }
+    // Method to update parameters from the TrainingManager during curriculum learning
+    public void UpdateParameters(
+        float newSpeedReward,
+        float newCheckpointReward,
+        float newDirectionAlignmentReward,
+        float newLapCompletionReward,
+        float newBackwardsPenalty,
+        float newNoProgressPenalty,
+        float newReversePenalty,
+        float newCollisionPenalty,
+        float newLongDriftReward,
+        float newFailedDriftPenalty,
+        float newNoProgressThresholdTime,
+        float survivalBias,
+        float newMaxTimeWithoutCheckpoint)
+    {
+        speedReward = newSpeedReward;
+        checkpointReward = newCheckpointReward;
+        directionAlignmentReward = newDirectionAlignmentReward;
+        lapCompletionReward = newLapCompletionReward;
+        backwardsPenalty = newBackwardsPenalty;
+        noProgressPenalty = newNoProgressPenalty;
+        reversePenalty = newReversePenalty;
+        collisionPenalty = newCollisionPenalty;
+        longDriftReward = newLongDriftReward;
+        failedDriftPenalty = newFailedDriftPenalty;
+        noProgressThresholdTime = newNoProgressThresholdTime;
+        maxTimeWithoutCheckpoint = newMaxTimeWithoutCheckpoint;
+
+        // Add a small survival reward based on the curriculum's survival bias
+        float survivalReward = survivalBias;
+
+        if (enableRewardLogging && Time.frameCount % 3000 == 0)
         {
-            straightLineDistanceToStart = Vector3.Distance(transform.position, checkpoints[0].transform.position);
+            Debug.Log($"[AGENT {gameObject.name}] Parameters updated: " +
+                     $"speedReward={speedReward:F3}, " +
+                     $"checkpointReward={checkpointReward:F1}, " +
+                     $"lapCompletionReward={lapCompletionReward:F1}, " +
+                     $"noProgressThresholdTime={noProgressThresholdTime:F1}");
         }
     }
 
@@ -1072,7 +1275,6 @@ public class CarAgent : Agent
         // Reset flags
         isWaitingForTrackRebuild = false;
         isReadyForRebuild = false;
-        isRecovering = false;
 
         // Re-enable components
         if (carController != null)
@@ -1253,6 +1455,56 @@ public class CarAgent : Agent
                 }
             }
         }
+
+        // Add drift-specific observations
+        AddDriftObservations(sensor);
+    }
+
+    private void AddDriftObservations(VectorSensor sensor)
+    {
+        // Is currently in tight corner
+        sensor.AddObservation(isInTightCorner ? 1.0f : 0.0f);
+
+        // Upcoming corner detection (reuse from your existing track knot system)
+        float upcomingCornerAngle = DetectUpcomingCornerAngle();
+        sensor.AddObservation(Mathf.Clamp01(upcomingCornerAngle / 90f));
+
+        // Distance to next corner
+        float distanceToCorner = DetectDistanceToNextCorner();
+        sensor.AddObservation(Mathf.Clamp01(distanceToCorner / 30f));
+
+        // Current speed compared to min drift speed
+        float speedRatio = carController.GetCurrentSpeed() / carController.minSpeedToDrift;
+        sensor.AddObservation(Mathf.Clamp01(speedRatio));
+
+        // Boost status
+        bool hasBoost = (carController.boostTimeRemaining > 0);
+        sensor.AddObservation(hasBoost ? 1.0f : 0.0f);
+
+        // Boost power level (based on how long the drift was)
+        float boostPower = hasBoost ? (carController.currentBoostPower / carController.boostForce) : 0f;
+        sensor.AddObservation(Mathf.Clamp01(boostPower));
+
+        // Current drift time normalized to longest threshold
+        float maxDriftThreshold = carController.boostThresholds.Length > 0 ?
+                              carController.boostThresholds[carController.boostThresholds.Length - 1] : 3f;
+        float normalizedDriftTime = carController.isDrifting ? (carController.driftTime / maxDriftThreshold) : 0f;
+        sensor.AddObservation(Mathf.Clamp01(normalizedDriftTime));
+
+        // Whether the current drift is at a "reward threshold"
+        bool isAtRewardThreshold = false;
+        if (carController.isDrifting && carController.boostThresholds.Length > 0)
+        {
+            foreach (float threshold in carController.boostThresholds)
+            {
+                if (Mathf.Abs(carController.driftTime - threshold) < 0.1f)
+                {
+                    isAtRewardThreshold = true;
+                    break;
+                }
+            }
+        }
+        sensor.AddObservation(isAtRewardThreshold ? 1.0f : 0.0f);
     }
 
     public override void OnActionReceived(ActionBuffers actionBuffers)
@@ -1304,12 +1556,12 @@ public class CarAgent : Agent
                 }
 
                 // Calculate steering smoothness penalty
-                float steerDelta = Mathf.Abs(currentActions[1] - prevSteer);
-                if (steerDelta > 0.3f) // Only penalize large, abrupt steering changes
-                {
-                    AddTrackedReward(steerDelta * jerkySteeringPenalty, "jerky_steering");
-                }
-                prevSteer = currentActions[1];
+                //float steerDelta = Mathf.Abs(currentActions[1] - prevSteer);
+                //if (steerDelta > 0.3f) // Only penalize large, abrupt steering changes
+                //{
+                //    AddTrackedReward(steerDelta * jerkySteeringPenalty, "jerky_steering");
+                //}
+                //prevSteer = currentActions[1];
 
                 // Apply penalty for using reverse
                 if (currentActions[2] > 0.5f)
@@ -1327,7 +1579,6 @@ public class CarAgent : Agent
             {
                 previousHandbrake = currentHandbrake;
                 currentHandbrake = actionBuffers.DiscreteActions[0] == 1;
-                isUsingHandbrake = currentHandbrake; // Keep this for other logic
             }
 
             // Reset interpolation timer
@@ -1384,7 +1635,6 @@ public class CarAgent : Agent
             CheckForNoProgress();
 
             prevDistanceToCheckpoint = distanceToNextCheckpoint;
-            prevPosition = transform.position;
 
             // If we've been asked to prepare for rebuild and we hit a wall, notify
             if (isWaitingForTrackRebuild && hasCollided)
@@ -1502,7 +1752,9 @@ public class CarAgent : Agent
         if (hasCollided)
         {
             // Handle collision based on the current training mode
-            bool useStrictMode = trainingManager != null && trainingManager.IsUsingStrictResets();
+            //bool useStrictMode = trainingManager != null && trainingManager.IsUsingStrictResets();
+            float resetProbability = trainingManager != null ? trainingManager.GetResetProbability() : 0.0f;
+            bool shouldReset = UnityEngine.Random.value < resetProbability;
 
             // Apply stronger collision penalty
             AddTrackedReward(collisionPenalty, "collision");
@@ -1521,7 +1773,7 @@ public class CarAgent : Agent
 
             // Modified collision handling: Only reset in strict mode
             // No longer reset on high speed collisions automatically
-            if (resetOnCollision && useStrictMode)
+            if (shouldReset)
             {
                 // Apply more severe penalty for crashing in strict mode
                 AddTrackedReward(-1.0f, "severe_collision");
@@ -1529,13 +1781,6 @@ public class CarAgent : Agent
 
                 // End episode for this agent
                 EndEpisode();
-            }
-            else
-            {
-                // In recovery mode - start tracking recovery
-                collisionPosition = transform.position;
-                recoveryStartTime = Time.time;
-                isRecovering = true;
             }
 
             // Reset collision flag
@@ -1586,9 +1831,11 @@ public class CarAgent : Agent
         // Only process events for this agent
         if (player != this.gameObject) return;
 
+        // Get the expected index right at the start, before RaceManager potentially updates it
+        int expectedIndex = raceManager.GetPlayerNextCheckpoint(gameObject);
+
         if (enableCheckpointDebugging)
         {
-            int expectedIndex = raceManager.GetPlayerNextCheckpoint(gameObject);
             int currentLap = raceManager.GetPlayerCurrentLap(gameObject);
             bool fullCircuit = raceManager.HasPlayerCompletedFullCircuit(gameObject);
 
@@ -1598,27 +1845,20 @@ public class CarAgent : Agent
                       $"full_circuit={fullCircuit}");
         }
 
-        // Let's rely on RaceManager to validate correctness
-        // We'll handle wrong checkpoints via OnRaceManagerWrongCheckpoint
+        totalCheckpointsPassed++;
 
-        // Check if this was the correct checkpoint by comparing with expected next checkpoint
-        int expectedNextIndex = raceManager.GetPlayerNextCheckpoint(gameObject);
-        int previousIndex = (expectedNextIndex - 1 + checkpoints.Count) % checkpoints.Count;
-
-        if (checkpointIndex == previousIndex)
+        if (trainingManager != null)
         {
-            // This was the expected checkpoint
-            totalCheckpointsPassed++;
-
-            // Update direction info
-            UpdateCheckpointInfo();
-
-            // Apply rewards
-            CalculateCheckpointReward(checkpointIndex);
-
-            // Update timers
-            lastCheckpointTime = Time.time;
+            trainingManager.RecordCheckpointCompletion(this);
         }
+
+        UpdateCheckpointInfo();
+
+        CalculateCheckpointReward(checkpointIndex);
+
+        lastCheckpointTime = Time.time;
+
+
     }
 
     // Handle wrong checkpoint - new method
@@ -1766,6 +2006,12 @@ public class CarAgent : Agent
     public void ReportCollision()
     {
         hasCollided = true;
+
+        // Report collision to TrainingManager for progress tracking
+        if (trainingManager != null)
+        {
+            trainingManager.RecordCollision(this);
+        }
     }
 
     // Set input values on the car controller

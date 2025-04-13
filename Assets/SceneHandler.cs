@@ -62,7 +62,7 @@ namespace Assets.TrackGeneration
 
         [Header("Race Settings")]
         public int totalLaps = 3;
-        public float countdownTime = 3f;
+        public float countdownTime = 10f;
 
         public bool setupCar = true;
         public bool setupTrack = true;
@@ -187,6 +187,10 @@ namespace Assets.TrackGeneration
 
             // Add TrackHandler component
             trackHandler = trackSystem.AddComponent<TrackHandler>();
+            //var trackVisualiser = trackSystem.AddComponent<TrackTestingVisualization>();
+            //trackVisualiser.trackHandler = trackHandler;
+            //var trackExt = trackSystem.AddComponent<TrackHandlerExtension>();
+
 
             // Set up track materials
             trackHandler.trackMaterial = trackMaterial;
@@ -224,12 +228,12 @@ namespace Assets.TrackGeneration
         public void GenerateTrack()
         {
             Debug.Log("Generating track...");
-            // Randomly choose between grid and circular layouts only
-            int strategy = UnityEngine.Random.Range(0, 2);
-            if (strategy == 0)
-                trackHandler.GenerateTrack(GenerationStrategy.GridWithNoise);
-            else
-                trackHandler.GenerateTrack(GenerationStrategy.CircularLayout);
+            trackHandler.GenerateTrack(GenerationStrategy.CircularLayout);
+            //int strategy = UnityEngine.Random.Range(0, 2);
+            //if (strategy == 0)
+            //    trackHandler.GenerateTrack(GenerationStrategy.GridWithNoise);
+            //else
+            //    trackHandler.GenerateTrack(GenerationStrategy.CircularLayout);
             Debug.Log("Track generation complete!");
         }
 
@@ -303,6 +307,7 @@ namespace Assets.TrackGeneration
 
             playerCar = carSpawner.GetPlayerCar();
 
+
             // Get AI car references
             if (enableAICars)
             {
@@ -346,6 +351,7 @@ namespace Assets.TrackGeneration
             raceSystem = raceManagerObj.AddComponent<RaceManager>();
             raceSystem.totalLaps = totalLaps;
             raceSystem.countdownTime = countdownTime;
+            raceSystem.skipCountdownForTraining = false;
         }
 
         private IEnumerator InitializeRaceSystem()
@@ -369,8 +375,14 @@ namespace Assets.TrackGeneration
 
             if (playerCar != null)
             {
+                // First, set up the UI so it can subscribe to all RaceManager events.
+                SetupRaceUI();
+
+                // Now register the player and initialize checkpoints.
                 raceSystem.RegisterPlayer(playerCar, "Player 1");
                 raceSystem.InitializeCheckpoints(checkpoints);
+
+                // With the UI already listening, start the countdown.
                 raceSystem.InitiateRaceStart();
                 Debug.Log("Race system initialized successfully");
             }
@@ -379,6 +391,7 @@ namespace Assets.TrackGeneration
                 Debug.LogError("PlayerCar is null!");
             }
         }
+
 
         private void SetupRaceUI()
         {
@@ -391,60 +404,36 @@ namespace Assets.TrackGeneration
             canvasObj.transform.SetParent(uiObject.transform);
             Canvas canvas = canvasObj.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-
-            // Add required canvas components
             canvasObj.AddComponent<CanvasScaler>();
             canvasObj.AddComponent<GraphicRaycaster>();
 
             // Create a panel for race info
             GameObject panelObj = new GameObject("Race Info Panel");
             panelObj.transform.SetParent(canvasObj.transform, false);
-
-            // Add panel components
             RectTransform panelRect = panelObj.AddComponent<RectTransform>();
             Image panelImage = panelObj.AddComponent<Image>();
-            panelImage.color = new Color(0, 0, 0, 0.5f); // Semi-transparent black background
-
-            // Position panel in top-right corner
+            panelImage.color = new Color(0, 0, 0, 0.5f);
             panelRect.anchorMin = new Vector2(1, 1);
             panelRect.anchorMax = new Vector2(1, 1);
             panelRect.pivot = new Vector2(1, 1);
-            panelRect.sizeDelta = new Vector2(200, 200); // Width and height of panel
-            panelRect.anchoredPosition = new Vector2(-20, -20); // Offset from corner
+            panelRect.sizeDelta = new Vector2(200, 200);
+            panelRect.anchoredPosition = new Vector2(-20, -20);
 
-            // Create text elements
-            float yOffset = -10f; // Starting Y position
-            float spacing = 30f;  // Spacing between elements
+            // Create and assign UI text elements
+            float yOffset = -10f;
+            float spacing = 30f;
 
-            // Current Time
-            uiManager.currentTimeText = CreateTextElement(panelObj, "Current Time: 00:00.000",
-                new Vector2(-10, yOffset));
+            uiManager.currentLapTimeText = CreateTextElement(panelObj, "Current Lap: 00:00.000", new Vector2(-10, yOffset));
             yOffset -= spacing;
-
-            // Current Lap
-            uiManager.currentLapText = CreateTextElement(panelObj, "Lap: 1/3",
-                new Vector2(-10, yOffset));
+            uiManager.bestLapText = CreateTextElement(panelObj, "Best Lap: --:--:---", new Vector2(-10, yOffset));
             yOffset -= spacing;
-
-            // Best Lap
-            uiManager.bestLapText = CreateTextElement(panelObj, "Best Lap: --:--:---",
-                new Vector2(-10, yOffset));
+            uiManager.lapCountText = CreateTextElement(panelObj, "Lap: 1/" + raceSystem.totalLaps, new Vector2(-10, yOffset));
             yOffset -= spacing;
-
-            // Lap Count
-            uiManager.lapCountText = CreateTextElement(panelObj, "Checkpoint: 1/10",
-                new Vector2(-10, yOffset));
+            uiManager.raceTimeText = CreateTextElement(panelObj, "Race Time: 00:00.000", new Vector2(-10, yOffset));
             yOffset -= spacing;
-
-            // Checkpoint
-            uiManager.checkpointText = CreateTextElement(panelObj, "Checkpoint: 1/10",
-                new Vector2(-10, yOffset));
-            yOffset -= spacing;
-
-            // Speed
-            uiManager.speedText = CreateTextElement(panelObj, "Speed: 0 km/h",
-                new Vector2(-10, yOffset));
+            uiManager.lapResultsText = CreateTextElement(panelObj, "", new Vector2(-10, yOffset));
         }
+
 
         private TextMeshProUGUI CreateTextElement(GameObject parent, string defaultText, Vector2 position)
         {

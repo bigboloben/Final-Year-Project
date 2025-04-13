@@ -1,22 +1,37 @@
 using UnityEngine;
 using TMPro;
-using UnityEngine.UI;
+using System.Collections;
 
 namespace Assets.TrackGeneration
 {
     public class RaceUIManager : MonoBehaviour
     {
         [Header("UI Text References")]
-        public TextMeshProUGUI currentTimeText;
-        public TextMeshProUGUI currentLapText;
+        [Tooltip("Displays the player's current lap time.")]
+        public TextMeshProUGUI currentLapTimeText;
+
+        [Tooltip("Displays the best lap time achieved.")]
         public TextMeshProUGUI bestLapText;
+
+        [Tooltip("Displays the current lap number and total laps.")]
         public TextMeshProUGUI lapCountText;
-        public TextMeshProUGUI checkpointText;
-        public TextMeshProUGUI speedText;
+
+        [Tooltip("Displays the overall race time.")]
+        public TextMeshProUGUI raceTimeText;
+
+        [Tooltip("Displays a list of completed lap times.")]
+        public TextMeshProUGUI lapResultsText;
+
+        [Tooltip("Displays the countdown before the race starts.")]
+        public TextMeshProUGUI countdownText;
 
         private RaceManager raceManager;
         private GameObject playerCar;
 
+        /// <summary>
+        /// Initializes the RaceUIManager with the RaceManager and player's car reference.
+        /// This method can be called by another manager or during setup.
+        /// </summary>
         public void Initialize(RaceManager raceManagerRef, GameObject playerCarRef)
         {
             raceManager = raceManagerRef;
@@ -24,38 +39,42 @@ namespace Assets.TrackGeneration
 
             if (raceManager == null)
             {
-                Debug.LogError("RaceManager reference is null in Initialize!");
+                Debug.LogError("RaceManager reference is null in RaceUIManager.Initialize!");
                 return;
             }
-
             if (playerCar == null)
             {
-                Debug.LogError("PlayerCar reference is null in Initialize!");
+                Debug.LogError("PlayerCar reference is null in RaceUIManager.Initialize!");
                 return;
             }
 
-            // Subscribe to race events
+            // Subscribe to RaceManager events
             raceManager.OnRaceStart += HandleRaceStart;
             raceManager.OnPlayerFinish += HandlePlayerFinish;
-            raceManager.OnCheckpointPassed += HandleCheckpointPassed;
             raceManager.OnLapCompleted += HandleLapCompleted;
 
-            //Debug.Log("RaceUIManager initialized successfully with RaceManager and PlayerCar references");
+            // Subscribe to countdown tick event
+            raceManager.OnCountdownTick += HandleCountdownTick;
         }
+
+
         void Start()
         {
-            //raceManager = GetComponent<RaceManager>();
-            if (raceManager != null)
+            // Auto-assign references if they haven't been assigned by an external initializer.
+            if (raceManager == null)
             {
-                // Subscribe to race events
-                raceManager.OnRaceStart += HandleRaceStart;
-                raceManager.OnPlayerFinish += HandlePlayerFinish;
-                raceManager.OnCheckpointPassed += HandleCheckpointPassed;
-                raceManager.OnLapCompleted += HandleLapCompleted;
+                raceManager = GetComponent<RaceManager>();
+                if (raceManager != null)
+                {
+                    raceManager.OnRaceStart += HandleRaceStart;
+                    raceManager.OnPlayerFinish += HandlePlayerFinish;
+                    raceManager.OnLapCompleted += HandleLapCompleted;
+                }
             }
-
-            // Find player car
-            //playerCar = GameObject.FindGameObjectWithTag("Player");
+            if (playerCar == null)
+            {
+                playerCar = GameObject.FindGameObjectWithTag("Player");
+            }
         }
 
         void Update()
@@ -66,32 +85,32 @@ namespace Assets.TrackGeneration
             }
         }
 
+        /// <summary>
+        /// Updates the UI elements each frame.
+        /// </summary>
         private void UpdateUI()
         {
-            // Format time as minutes:seconds.milliseconds
-            float currentTime = raceManager.GetPlayerCurrentLapTime(playerCar);
+            // Update current lap time display
+            float currentLapTime = raceManager.GetPlayerCurrentLapTime(playerCar);
+            currentLapTimeText.text = "Current Lap: " + FormatTime(currentLapTime);
+
+            // Update best lap time display (if a lap has been recorded, otherwise show placeholder)
             float bestLap = raceManager.GetPlayerBestLapTime(playerCar);
+            bestLapText.text = "Best Lap: " + (bestLap == float.MaxValue ? "--:--:---" : FormatTime(bestLap));
 
-            currentTimeText.text = $"Current Time: {FormatTime(currentTime)}";
-            bestLapText.text = $"Best Lap: {(bestLap == float.MaxValue ? "--:--:---" : FormatTime(bestLap))}";
+            // Update lap count display (using 1-based counting for the UI)
+            int lapIndex = raceManager.GetPlayerCurrentLap(playerCar);
+            lapCountText.text = "Lap: " + (lapIndex + 1) + "/" + raceManager.totalLaps;
 
-            int currentLap = raceManager.GetPlayerCurrentLap(playerCar);
-            int totalLaps = raceManager.totalLaps;
-            lapCountText.text = $"Lap: {currentLap + 1}/{totalLaps}";
-
-            int nextCheckpoint = raceManager.GetPlayerNextCheckpoint(playerCar);
-            int totalCheckpoints = raceManager.GetTotalCheckpoints();
-            checkpointText.text = $"Checkpoint: {nextCheckpoint + 1}/{totalCheckpoints}";
-
-            // Update speed display if the car has a Rigidbody
-            Rigidbody rb = playerCar.GetComponent<Rigidbody>();
-            if (rb != null)
-            {
-                float speedKmH = rb.linearVelocity.magnitude * 3.6f; // Convert m/s to km/h
-                speedText.text = $"Speed: {speedKmH:F0} km/h";
-            }
+            // Update overall race time display from the global race timer
+            raceTimeText.text = "Race Time: " + FormatTime(raceManager.GetGlobalRaceTime());
         }
 
+        /// <summary>
+        /// Formats the time (in seconds) into mm:ss.mmm string.
+        /// </summary>
+        /// <param name="timeInSeconds">Time value in seconds.</param>
+        /// <returns>Formatted string representation.</returns>
         private string FormatTime(float timeInSeconds)
         {
             int minutes = (int)(timeInSeconds / 60);
@@ -100,65 +119,72 @@ namespace Assets.TrackGeneration
             return $"{minutes:00}:{seconds:00}.{milliseconds:000}";
         }
 
+        /// <summary>
+        /// Called when the race starts. Resets UI elements.
+        /// </summary>
         private void HandleRaceStart()
         {
-            currentTimeText.text = "Current Time: 00:00.000";
+            currentLapTimeText.text = "Current Lap: 00:00.000";
             bestLapText.text = "Best Lap: --:--:---";
-            lapCountText.text = $"Lap: 1/{raceManager.totalLaps}";
-            checkpointText.text = "Checkpoint: 1/" + raceManager.GetTotalCheckpoints();
-            speedText.text = "Speed: 0 km/h";
+            lapCountText.text = "Lap: 1/" + raceManager.totalLaps;
+            raceTimeText.text = "Race Time: 00:00.000";
+            lapResultsText.text = "";  // Clear any previous lap results.
         }
 
-        private void HandlePlayerFinish(GameObject player)
+        private void HandleCountdownTick(float timeRemaining)
         {
-            if (player == playerCar)
+            if (countdownText != null)
             {
-                // Show race completion message
-                currentTimeText.text = "Race Complete!";
-                currentTimeText.color = Color.green;  // Change color to indicate finish
-
-                // Display final race time
-                float finalTime = raceManager.GetGlobalRaceTime();
-                bestLapText.text = $"Final Time: {FormatTime(finalTime)}";
+                if (timeRemaining > 0)
+                    countdownText.text = Mathf.Ceil(timeRemaining).ToString();
+                else
+                    countdownText.text = "GO!";
             }
         }
 
-        private void HandleCheckpointPassed(GameObject player, int checkpointIndex, int totalCheckpoints)
-        {
-            if (player == playerCar)
-            {
-                // Update checkpoint counter
-                checkpointText.text = $"Checkpoint: {checkpointIndex + 1}/{totalCheckpoints}";
-
-                // Flash the checkpoint text briefly to indicate passing
-                //StartCoroutine(FlashText(checkpointText));
-            }
-        }
-
+        /// <summary>
+        /// Called each time a lap is completed.
+        /// Appends the most recent lap time to the lap results display.
+        /// </summary>
         private void HandleLapCompleted(GameObject player)
         {
             if (player == playerCar)
             {
-                int currentLap = raceManager.GetPlayerCurrentLap(playerCar);
-                lapCountText.text = $"Lap: {currentLap + 1}/{raceManager.totalLaps}";
+                // Retrieve the player's completed lap times. (See note above on adding this getter.)
+                var lapTimes = raceManager.GetPlayerLapTimes(playerCar);
+                if (lapTimes != null && lapTimes.Count > 0)
+                {
+                    // Get the last lap time (newly recorded lap).
+                    float lastLapTime = lapTimes[lapTimes.Count - 1];
+                    int completedLapNumber = lapTimes.Count;  // Each recorded lap is a completed lap.
+                    lapResultsText.text += $"Lap {completedLapNumber}: {FormatTime(lastLapTime)}\n";
+                }
 
-                // Flash the lap counter and display the last lap time
-                //StartCoroutine(FlashText(lapCountText));
+                // Update the lap count display in case it has advanced.
+                int lapIndex = raceManager.GetPlayerCurrentLap(playerCar);
+                lapCountText.text = "Lap: " + (lapIndex + 1) + "/" + raceManager.totalLaps;
+            }
+        }
 
-                // Update best lap if this was a better time
-                float bestLap = raceManager.GetPlayerBestLapTime(playerCar);
-                bestLapText.text = $"Best Lap: {FormatTime(bestLap)}";
+        /// <summary>
+        /// Called when the player's race is complete.
+        /// Updates the overall race time to show the final time.
+        /// </summary>
+        private void HandlePlayerFinish(GameObject player)
+        {
+            if (player == playerCar)
+            {
+                raceTimeText.text = "Race Complete! Final Time: " + FormatTime(raceManager.GetGlobalRaceTime());
             }
         }
 
         void OnDestroy()
         {
+            // Unsubscribe from events when this UI manager is destroyed.
             if (raceManager != null)
             {
-                // Unsubscribe from events
                 raceManager.OnRaceStart -= HandleRaceStart;
                 raceManager.OnPlayerFinish -= HandlePlayerFinish;
-                raceManager.OnCheckpointPassed -= HandleCheckpointPassed;
                 raceManager.OnLapCompleted -= HandleLapCompleted;
             }
         }

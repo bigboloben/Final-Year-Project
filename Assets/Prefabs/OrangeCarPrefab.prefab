@@ -15120,6 +15120,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   trackHandler: {fileID: 0}
+  isPlayerControlled: 1
   accelerationForce: 40
   reverseForce: 20
   maxSteeringAngle: 70
@@ -15147,11 +15148,15 @@ MonoBehaviour:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
+  enableVisualEffects: 1
   vehicleModel: {fileID: 0}
   sidewaysGripFactor: 2
   forwardGripFactor: 1.5
   maxVelocity: 30
   spherePhysicMaterial: {fileID: 0}
+  isDrifting: 0
+  driftTime: 0
+  currentBoostPower: 0
   driftGripFactor: 0.5
   minSpeedToDrift: 8
   driftSteerAngle: 15
@@ -15162,6 +15167,7 @@ MonoBehaviour:
   - 1
   - 2
   - 3
+  boostTimeRemaining: 0
   removeBounces: 1
 --- !u!1 &7062006306672500520
 GameObject:

@@ -4195,6 +4195,7 @@
     "m_SourceType": 0,
     "m_FunctionName": "CalculateMainLight",
     "m_FunctionSource": "4d294cd3065312140b4cf5ac732459e5",
+    "m_FunctionSourceUsePragmas": true,
     "m_FunctionBody": "Enter function body here..."
 }
 

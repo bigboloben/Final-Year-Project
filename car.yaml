@@ -1,4 +1,3 @@
----
 behaviors:
   CarAgent:
     trainer_type: ppo
@@ -21,54 +20,54 @@ behaviors:
         gamma: 0.99
         strength: 1
     keep_checkpoints: 5
-    max_steps: 20000000
+    max_steps: 60000000
     time_horizon: 128
     summary_freq: 10000
     threaded: true
 environment_parameters:
-  track_rebuild_episodes:
+  episodes_before_rebuild:
     curriculum:
       - name: Initial
-        value: 1000
+        value: 200
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 100000
-          threshold: 0.2
-      - name: Intermediate
-        value: 750
-        completion_criteria:
-          measure: progress
-          behavior: CarAgent
-          min_lesson_length: 100000
+          min_lesson_length: 0
           threshold: 0.4
-      - name: Advanced
-        value: 500
+      - name: Intermediate
+        value: 100
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 100000
+          min_lesson_length: 0
           threshold: 0.6
+      - name: Advanced
+        value: 50
+        completion_criteria:
+          measure: progress
+          behavior: CarAgent
+          min_lesson_length: 0
+          threshold: 0.8
       - name: Expert
-        value: 250
+        value: 25
   max_time_without_checkpoint:
     curriculum:
       - name: Beginner
-        value: 75
+        value: 8
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 300000
+          min_lesson_length: 0
           threshold: 0.5
       - name: Intermediate
-        value: 60
+        value: 6
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 200000
+          min_lesson_length: 0
           threshold: 0.6
       - name: Advanced
-        value: 45
+        value: 3
   no_progress_threshold_time:
     curriculum:
       - name: Initial
@@ -76,7 +75,7 @@ environment_parameters:
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 300000
+          min_lesson_length: 0
           threshold: 0.4
       - name: Advanced
         value: 5
@@ -95,7 +94,7 @@ environment_parameters:
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 300000
+          min_lesson_length: 0
           threshold: 0.5
       - name: Advanced
         value: 2
@@ -125,8 +124,15 @@ environment_parameters:
         value: -0.15
   collision_penalty:
     curriculum:
-      - name: InitialLearning
-        value: -8
+      - name: Initial
+        value: -10
+        completion_criteria:
+          measure: progress
+          behavior: CarAgent
+          min_lesson_length: 0
+          threshold: 0.8
+      - name: Advanced
+        value: -20
   use_strict_resets:
     curriculum:
       - name: InitialStrict
@@ -134,28 +140,28 @@ environment_parameters:
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 200000
-          threshold: 0.5
+          min_lesson_length: 0
+          threshold: 0.4
       - name: GradualTransition
         value: 0.75
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 150000
-          threshold: 0.6
+          min_lesson_length: 0
+          threshold: 0.5
       - name: FurtherTransition
         value: 0.5
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 150000
+          min_lesson_length: 0
           threshold: 0.7
       - name: MinimalResets
         value: 0.25
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 150000
+          min_lesson_length: 0
           threshold: 0.8
       - name: RecoveryMode
         value: 0
@@ -166,15 +172,17 @@ environment_parameters:
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 150000
+          min_lesson_length: 0
           threshold: 0.4
       - name: Advanced
         value: 15.0
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 200000
+          min_lesson_length: 0
           threshold: 0.5
+      - name: Elite
+        value: 20.0
   failedDriftPenalty:
     curriculum:
       - name: Initial
@@ -182,20 +190,22 @@ environment_parameters:
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 150000
+          min_lesson_length: 0
           threshold: 0.4
       - name: Intermediate
         value: -3.0
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 200000
+          min_lesson_length: 0
           threshold: 0.5
       - name: Advanced
         value: -5.0
         completion_criteria:
           measure: progress
           behavior: CarAgent
-          min_lesson_length: 300000
+          min_lesson_length: 0
           threshold: 0.7
+      - name: Elite
+        value: -8.0
 

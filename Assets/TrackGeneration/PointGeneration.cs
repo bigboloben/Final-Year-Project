@@ -7,10 +7,6 @@ namespace Assets.TrackGeneration
     {
         GridWithNoise,
         CircularLayout,
-        SpiralLayout,
-        DiagonalStrips,
-        ClusteredGroups,
-        RadialSpokes,
         Random
     }
 

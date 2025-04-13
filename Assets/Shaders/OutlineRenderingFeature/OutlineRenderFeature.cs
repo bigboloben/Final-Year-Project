@@ -75,7 +75,7 @@ namespace Assets.Shaders.OutlineRenderingFeature
 
             transferPass = new TransferMaterialPass();
             transferPass.renderPassEvent = injectionPoint;
-            
+
 
         }
 
@@ -120,7 +120,7 @@ namespace Assets.Shaders.OutlineRenderingFeature
                 shaderTagIDs.Add(new ShaderTagId("UniversalForward"));
                 shaderTagIDs.Add(new ShaderTagId("SRPDefaultUnlit"));
                 shaderTagIDs.Add(new ShaderTagId("LightweightForward"));
-                shaderTagIDs.Add(new ShaderTagId("ToonShader"));             
+                shaderTagIDs.Add(new ShaderTagId("ToonShader"));
             }
             public void Setup(Material material)
             {
@@ -166,7 +166,7 @@ namespace Assets.Shaders.OutlineRenderingFeature
                     universalRenderingData, universalCameraData, universalLightData, SortingCriteria.CommonOpaque);
                 drawingSettings.overrideMaterial = normalMaterial;
                 var para = new RendererListParams(universalRenderingData.cullResults, drawingSettings, filteringSettings);
-                
+
                 passData.rendererList = renderGraph.CreateRendererList(para);
             }
             private class PassData
@@ -220,7 +220,7 @@ namespace Assets.Shaders.OutlineRenderingFeature
 
         //    }
         //}
-        public class TransferMaterialPass: ScriptableRenderPass
+        public class TransferMaterialPass : ScriptableRenderPass
         {
             const string name = "TransferMaterialPass";
             string normalTextureName;
@@ -246,7 +246,7 @@ namespace Assets.Shaders.OutlineRenderingFeature
                 var cameraTH = resourceData.activeColorTexture;
 
                 var cameraTextureDesc = renderGraph.GetTextureDesc(cameraTH);
-                cameraTextureDesc.name = $"CameraColor-{name}";
+                cameraTextureDesc.name = $"_CameraColorTexture";
                 cameraTextureDesc.clearBuffer = false;
                 TextureHandle cameraTexture = renderGraph.CreateTexture(cameraTextureDesc);
 
@@ -254,24 +254,24 @@ namespace Assets.Shaders.OutlineRenderingFeature
 
                 if (RenderGraphUtils.CanAddCopyPassMSAA())
                 {
-                    renderGraph.AddCopyPass(cameraTH, cameraTexture, passName: name + "1");
-                    renderGraph.AddCopyPass(cameraTexture, cameraTH, passName: name + "2");
+                    renderGraph.AddCopyPass(cameraTH, cameraTexture, passName: "Copy Camera Texture");
+                    //renderGraph.AddCopyPass(cameraTexture, cameraTH, passName: name + "2");
 
 
-
-                    RenderGraphUtils.BlitMaterialParameters para = new(cameraTexture, resourceData.cameraColor, material, 0);
+                    RenderGraphUtils.BlitMaterialParameters para;
+                    para = new(cameraTexture, resourceData.cameraColor, material, 0);
                     para.sourceTexturePropertyID = Shader.PropertyToID("_CameraColorTexture");
-                    renderGraph.AddBlitPass(para, passName: $"{name} Camera Color blit");
+                    renderGraph.AddBlitPass(para, passName: $"Camera Texture Blit");
 
                     para = new(source, resourceData.cameraColor, material, 0);
                     para.sourceTexturePropertyID = Shader.PropertyToID(normalTextureName);
-                    renderGraph.AddBlitPass(para, passName: $"{name} Normal Texture blit");
+                    renderGraph.AddBlitPass(para, passName: $"Normal Texture Blit");
                 }
                 else { Debug.LogError("Cant add copy pass"); }
 
             }
         }
-        
+
 
         protected override void Dispose(bool disposing)
         {

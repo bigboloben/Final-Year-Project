@@ -24,7 +24,7 @@ namespace Assets.TrackGeneration
         [Range(0, 1)] public float ProximityQualityWeight = 0.2f;
 
         [Header("Corner Parameters")]
-        public float TooSharpCornerAngle = 30f;
+        public float TooSharpCornerAngle = 25f;
         public float SharpCornerAngle = 45f;
         public float MediumCornerAngle = 90f;
         public float WideCornerAngle = 120f;
@@ -39,8 +39,8 @@ namespace Assets.TrackGeneration
         public int DesiredStraightCount = 3;
 
         [Header("Track Safety")]
-        public float MinSafeDistance = 50f;
-        public float CriticalDistance = 40f;
+        public float MinSafeDistance = 20f;
+        public float CriticalDistance = 5f;
 
         [Header("Elevation Parameters")]
         public float MinHeight = 0f;

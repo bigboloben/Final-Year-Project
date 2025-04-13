@@ -38,7 +38,7 @@ public class TrainingManager : MonoBehaviour
     public float wallHeight = 0.5f;
     public float wallWidth = 0.5f;
     public float segments = 1f;
-    public float banking = 15f;
+    public float banking = 0f;
     public int supportCount = 0;
     public int pointCount = 150;
     public int canvasSize = 1000;
@@ -67,21 +67,16 @@ public class TrainingManager : MonoBehaviour
     // SECTION: Training Management and Curriculum
 
     [Header("Training Cycle")]
-    public int episodesBeforeRebuild = 500;
     public float trackRebuildDelay = 1f;
     public float maxWaitTimeForSynchronization = 20f;
     [Tooltip("If true, episode counters reset to 0 after track rebuild. If false, agents continue from their current episode count.")]
     public bool resetEpisodesAfterRebuild = true;
 
     [Header("Training Curriculum")]
-    [Tooltip("Start with strict resets on collision, transition to penalties only for recovery skills")]
-    public bool useStrictResets = true;
-    [Tooltip("How many episodes before switching to penalty-only mode")]
-    public int episodesToSwitchCollisionMode = 200000;
-    [Tooltip("Enable/disable randomization of starting positions")]
-    public bool randomizeStartPositions = true;
-    [Tooltip("Maximum offset for randomized starting positions")]
-    public float startPositionRandomization = 1.0f;
+    [Tooltip("Probability (0-1) of resetting on collision, gradually reduces during training")]
+    public float collisionResetProbability = 1.0f;
+    public int episodesBeforeRebuild = 1000;
+
 
     // Training progression tracking
     private int totalEpisodesCompleted = 0;  // Total individual episodes completed
@@ -89,6 +84,16 @@ public class TrainingManager : MonoBehaviour
     private int lastGlobalCounterBeforeRebuild = 0; // Last global counter value before rebuild
     private int totalLapsCompleted = 0;
     private float bestLapTime = float.MaxValue;
+
+    private float curriculumProgress = 0f; // 0.0 to 1.0 representing curriculum progress
+    private float totalCheckpointsAcrossAgents = 0f;
+    private float totalLapsAcrossAgents = 0f;
+    private float totalCollisionsAcrossAgents = 0f;
+    private int reportingCycle = 0;
+    private float lastProgressReportTime = 0f;
+    private float progressReportInterval = 20f; // Report progress every 20 seconds
+    private float lastDetailedProgressTime = 0f;
+    private const float DETAILED_PROGRESS_INTERVAL = 600f; // 10 minutes in seconds
 
     // Training State Management - using an enum for clear state tracking
     public enum TrainingState
@@ -153,16 +158,8 @@ public class TrainingManager : MonoBehaviour
 
     void Start()
     {
-        var episodesParam = Academy.Instance.EnvironmentParameters.GetWithDefault("track_rebuild_episodes", episodesBeforeRebuild);
-        episodesBeforeRebuild = (int)episodesParam;
-
-        // Set initial curriculum values from EnvironmentParameters if available
-        useStrictResets = Academy.Instance.EnvironmentParameters.GetWithDefault("use_strict_resets", useStrictResets ? 1.0f : 0.0f) > 0.5f;
-        episodesToSwitchCollisionMode = (int)Academy.Instance.EnvironmentParameters.GetWithDefault("episodes_to_switch_collision", episodesToSwitchCollisionMode);
-        randomizeStartPositions = Academy.Instance.EnvironmentParameters.GetWithDefault("randomize_starts", randomizeStartPositions ? 1.0f : 0.0f) > 0.5f;
-        startPositionRandomization = Academy.Instance.EnvironmentParameters.GetWithDefault("start_randomization", startPositionRandomization);
-        resetEpisodesAfterRebuild = Academy.Instance.EnvironmentParameters.GetWithDefault("reset_episodes_after_rebuild", resetEpisodesAfterRebuild ? 1.0f : 0.0f) > 0.5f;
-
+        UpdateCurriculum();
+        // Remove the conversion to boolean since we're keeping it as a float now
         // Initialize and set up all components in sequence
         StartCoroutine(SetupSequence());
     }
@@ -183,10 +180,12 @@ public class TrainingManager : MonoBehaviour
             {
                 Debug.Log($"[STATS] FPS: {fps:F1} | Global Episodes: {globalEpisodeCounter} | " +
                          $"Current Episode: {currentEpisode} | Laps: {totalLapsCompleted} | " +
-                         $"Strict Resets: {useStrictResets} | " +
                          $"Best Lap: {(bestLapTime < float.MaxValue ? bestLapTime.ToString("F2") + "s" : "None")}");
             }
         }
+
+        // Update and report progress for curriculum advancement
+        UpdateAndReportProgress();
 
         // Check for curriculum progression
         if (Time.time > nextCurriculumCheckTime)
@@ -210,23 +209,57 @@ public class TrainingManager : MonoBehaviour
     // Update curriculum based on training progress
     private void UpdateCurriculum()
     {
-        // Switch from strict resets to penalty-only mode after threshold
-        if (useStrictResets && globalEpisodeCounter > episodesToSwitchCollisionMode)
+        // Basic training parameters
+        collisionResetProbability = Academy.Instance.EnvironmentParameters.GetWithDefault("use_strict_resets", collisionResetProbability);
+        episodesBeforeRebuild = (int)Academy.Instance.EnvironmentParameters.GetWithDefault("episodes_before_rebuild", episodesBeforeRebuild);
+        maxWaitTimeForSynchronization = Academy.Instance.EnvironmentParameters.GetWithDefault("maxWaitTimeForSynchronization", maxWaitTimeForSynchronization);
+
+        // Get reward parameters and distribute to agents
+        float speedReward = Academy.Instance.EnvironmentParameters.GetWithDefault("speed_reward", 0.05f);
+        float checkpointReward = Academy.Instance.EnvironmentParameters.GetWithDefault("checkpoint_reward", 1f);
+        float directionAlignmentReward = Academy.Instance.EnvironmentParameters.GetWithDefault("direction_alignment_reward", 0.2f);
+        float lapCompletionReward = Academy.Instance.EnvironmentParameters.GetWithDefault("lapCompletionReward", 8f);
+        float backwardsPenalty = Academy.Instance.EnvironmentParameters.GetWithDefault("backwards_penalty", -2f);
+        float noProgressPenalty = Academy.Instance.EnvironmentParameters.GetWithDefault("no_progress_penalty", -0.2f);
+        float reversePenalty = Academy.Instance.EnvironmentParameters.GetWithDefault("reverse_penalty", -0.15f);
+        float collisionPenalty = Academy.Instance.EnvironmentParameters.GetWithDefault("collision_penalty", -8f);
+        float longDriftReward = Academy.Instance.EnvironmentParameters.GetWithDefault("longDriftReward", 10f);
+        float failedDriftPenalty = Academy.Instance.EnvironmentParameters.GetWithDefault("failedDriftPenalty", -2f);
+        float noProgressThresholdTime = Academy.Instance.EnvironmentParameters.GetWithDefault("no_progress_threshold_time", 12f);
+        float survivalBias = Academy.Instance.EnvironmentParameters.GetWithDefault("survival_bias", 0.002f);
+        float maxTimeWithoutCheckpoint = Academy.Instance.EnvironmentParameters.GetWithDefault("max_time_without_checkpoint", 30f);
+
+
+        // Update all active agents with the new parameters
+        foreach (var agent in agents)
         {
-            useStrictResets = false;
-            Debug.Log($"[CURRICULUM] Switching to penalty-only mode for collisions after {globalEpisodeCounter} global episodes");
+            if (agent != null)
+            {
+                agent.UpdateParameters(
+                    speedReward,
+                    checkpointReward,
+                    directionAlignmentReward,
+                    lapCompletionReward,
+                    backwardsPenalty,
+                    noProgressPenalty,
+                    reversePenalty,
+                    collisionPenalty,
+                    longDriftReward,
+                    failedDriftPenalty,
+                    noProgressThresholdTime,
+                    survivalBias,
+                    maxTimeWithoutCheckpoint
+                );
+            }
         }
 
-        // Gradually increase randomness as training progresses
-        float progressFactor = Mathf.Min(1.0f, globalEpisodeCounter / (float)(episodesToSwitchCollisionMode * 2));
-        startPositionRandomization = Mathf.Lerp(0.5f, 2.0f, progressFactor);
-        
-
-        // Log curriculum updates
         if (isDebugLoggingEnabled)
         {
-            Debug.Log($"[CURRICULUM] Updated parameters: Start randomization = {startPositionRandomization:F2}, "  +
-                     $"Global episodes: {globalEpisodeCounter}");
+            Debug.Log($"[CURRICULUM] Current collision reset probability: {collisionResetProbability:F2}, " +
+                $"Current Track rebuild rate: {episodesBeforeRebuild}, " +
+                $"Global episodes: {globalEpisodeCounter}, " +
+                $"Checkpoint reward: {checkpointReward}, " +
+                $"LapCompletion reward: {lapCompletionReward}");
         }
     }
 
@@ -376,7 +409,7 @@ public class TrainingManager : MonoBehaviour
         // Randomly choose between grid and circular layouts only
         int strategy = UnityEngine.Random.Range(0, 2);
         if (strategy == 0)
-            trackHandler.GenerateTrack(GenerationStrategy.GridWithNoise);
+            trackHandler.GenerateTrack(GenerationStrategy.CircularLayout);
         else
             trackHandler.GenerateTrack(GenerationStrategy.CircularLayout);
         if (isDebugLoggingEnabled) Debug.Log("Track generation complete!");
@@ -526,7 +559,7 @@ public class TrainingManager : MonoBehaviour
             carAgent.completedCheckpointsBeforeNewTrack = int.MaxValue;
 
             // Calculate total observations
-            int totalObservations = 52; 
+            int totalObservations = 60;
 
             // Configure Behavior Parameters
             Unity.MLAgents.Policies.BehaviorParameters behaviorParams =
@@ -664,6 +697,7 @@ public class TrainingManager : MonoBehaviour
     public void RecordLapCompletion(float lapTime)
     {
         totalLapsCompleted++;
+        totalLapsAcrossAgents++;
 
         // Update best lap time
         if (lapTime < bestLapTime)
@@ -728,12 +762,10 @@ public class TrainingManager : MonoBehaviour
         }
     }
 
-    // Get whether we're currently using strict (reset) collision mode
-    public bool IsUsingStrictResets()
+    public float GetResetProbability()
     {
-        return useStrictResets;
+        return collisionResetProbability;
     }
-
 
     // Safely change the training state
     private void ChangeState(TrainingState newState)
@@ -762,7 +794,7 @@ public class TrainingManager : MonoBehaviour
         param.PointCount = pointCounts[UnityEngine.Random.Range(0, pointCounts.Length)];
 
         // Track Geometry
-        
+
         param.IdealTrackLength = UnityEngine.Random.Range(1000f, 1400f);
         param.MinTrackLength = UnityEngine.Random.Range(param.IdealTrackLength - 200f, param.IdealTrackLength);
         param.MaxTrackLength = UnityEngine.Random.Range(param.IdealTrackLength, param.IdealTrackLength + 200f);
@@ -924,6 +956,10 @@ public class TrainingManager : MonoBehaviour
             raceManager.InitiateRaceStart();
             if (isDebugLoggingEnabled) Debug.Log("[REBUILD] Race restarted");
         }
+
+        totalCheckpointsAcrossAgents = 0;
+        totalCollisionsAcrossAgents = 0;
+        totalLapsAcrossAgents = 0;
 
         // Return to normal training state
         ChangeState(TrainingState.NormalTraining);
@@ -1118,6 +1154,133 @@ public class TrainingManager : MonoBehaviour
     //        Debug.LogError($"Cannot reposition agent {agent.gameObject.name}: CarControlScript not found");
     //    }
     //}
+
+    private void UpdateAndReportProgress()
+    {
+        reportingCycle++;
+
+        if (Time.time < lastProgressReportTime + progressReportInterval)
+            return; // Only report at intervals
+
+        lastProgressReportTime = Time.time;
+
+        // Calculate progress based on multiple factors
+        float checkpointProgress = CalculateCheckpointProgress();
+        float lapProgress = CalculateLapProgress();
+        float reliabilityProgress = CalculateReliabilityProgress();
+
+        // Combine different progress metrics with weights
+        curriculumProgress = (checkpointProgress * 0.35f) +
+                            (lapProgress * 0.35f) +
+                            (reliabilityProgress * 0.3f);
+
+        // Clamp to valid range
+        curriculumProgress = Mathf.Clamp01(curriculumProgress);
+
+        // Report progress to ML-Agents for curriculum advancement
+        Academy.Instance.StatsRecorder.Add("CarAgent?team=0:progress", curriculumProgress);
+        //Debug.LogWarning($"[PROGRESS] Current curriculum progress: {curriculumProgress:F3} " +
+        //             $"(Checkpoints: {checkpointProgress:F2}, Laps: {lapProgress:F2}, " +
+        //             $"Reliability: {reliabilityProgress:F2}");
+        if (isDebugLoggingEnabled)
+        {
+            Debug.Log($"[PROGRESS] Current curriculum progress: {curriculumProgress:F3} " +
+                     $"(Checkpoints: {checkpointProgress:F2}, Laps: {lapProgress:F2}, " +
+                     $"Reliability: {reliabilityProgress:F2}");
+        }
+
+        if (Time.time >= lastDetailedProgressTime + DETAILED_PROGRESS_INTERVAL)
+        {
+            LogDetailedProgress();
+            lastDetailedProgressTime = Time.time;
+        }
+
+    }
+    private void LogDetailedProgress()
+    {
+        // Calculate all progress metrics
+        float checkpointProgress = CalculateCheckpointProgress();
+        float lapProgress = CalculateLapProgress();
+        float reliabilityProgress = CalculateReliabilityProgress();
+
+        // Format timestamp
+        System.DateTime now = System.DateTime.Now;
+        string timestamp = now.ToString("HH:mm:ss");
+
+        // Build a detailed progress report
+        System.Text.StringBuilder report = new System.Text.StringBuilder();
+        report.AppendLine("==================================================");
+        report.AppendLine($"[TRAINING PROGRESS REPORT] - {timestamp}");
+        report.AppendLine("==================================================");
+        report.AppendLine($"Training Duration: {Time.time / 60f:F1} minutes");
+        report.AppendLine($"Global Episodes: {globalEpisodeCounter}");
+        report.AppendLine($"Current Episode: {currentEpisode}");
+        report.AppendLine($"Total Laps: {totalLapsCompleted}");
+        report.AppendLine($"Best Lap Time: {(bestLapTime < float.MaxValue ? bestLapTime.ToString("F2") + "s" : "None")}");
+        report.AppendLine($"Total Checkpoints: {totalCheckpointsAcrossAgents}");
+        report.AppendLine($"Checkpoint Progress: {checkpointProgress}");
+        report.AppendLine($"Lap Progress: {lapProgress}");
+        report.AppendLine($"Reliability Progress: {reliabilityProgress}");
+        report.AppendLine($"Overall Curriculum Progress: {curriculumProgress}");
+        report.AppendLine($"Collisions: {totalCollisionsAcrossAgents}");
+        report.AppendLine($"Collision Reset Probability: {collisionResetProbability}");
+        report.AppendLine($"Rebuld time: {episodesBeforeRebuild}");
+        report.AppendLine("==================================================");
+
+        // Output to console - using LogWarning to make it stand out in the console
+        Debug.LogWarning(report.ToString());
+
+        // You could also write this to a file for later analysis
+        // System.IO.File.AppendAllText("training_progress.log", report.ToString() + "\n");
+    }
+
+    // Calculate progress based on checkpoint completions
+    private float CalculateCheckpointProgress()
+    {
+        if (totalActiveAgents == 0) return 0f;
+
+        // Calculate average checkpoints per agent
+        float avgCheckpoints = totalCheckpointsAcrossAgents / totalActiveAgents;
+
+
+        return Mathf.Min(1f, avgCheckpoints / ((float)totalLaps * 49) * (float)numberOfAgents);
+    }
+
+    // Calculate progress based on lap completions
+    private float CalculateLapProgress()
+    {
+        if (totalActiveAgents == 0) return 0f;
+
+        // Calculate average laps per agent
+        float avgLaps = totalLapsAcrossAgents / totalActiveAgents;
+
+        return Mathf.Min(1f, avgLaps / (float)totalLaps * (float)numberOfAgents);
+    }
+
+    // Calculate progress based on reliability (avoiding collisions)
+    private float CalculateReliabilityProgress()
+    {
+        if (totalActiveAgents == 0 || globalEpisodeCounter == 0) return 0f;
+
+        // Calculate collision rate
+        float collisionRate = totalCollisionsAcrossAgents / (totalActiveAgents * currentEpisode);
+
+        // Invert to get reliability (lower collision rate = higher reliability)
+        float reliability = 1f - Mathf.Min(1f, collisionRate);
+
+        return reliability;
+    }
+
+    // Add these methods to update the metrics
+    public void RecordCheckpointCompletion(CarAgent agent)
+    {
+        totalCheckpointsAcrossAgents++;
+    }
+
+    public void RecordCollision(CarAgent agent)
+    {
+        totalCollisionsAcrossAgents++;
+    }
 
     // SECTION: Trainer API and Utility Methods
 

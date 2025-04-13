@@ -13,6 +13,7 @@ public class CarControlScript : MonoBehaviour
     // Add a flag to determine if this car is player controlled or AI controlled
     [Header("Control Settings")]
     public bool isPlayerControlled = true;
+    public bool canMove = true;
 
     // Input values that both player and AI will use
     private float accelerationInput;
@@ -64,7 +65,7 @@ public class CarControlScript : MonoBehaviour
     [Header("Drift Settings")]
     public bool isDrifting;
     public float driftTime;
-    private float currentBoostPower;
+    public float currentBoostPower;
     private float driftDirection;
     public float driftGripFactor = 0.5f;      // Reduced grip during drift
     public float minSpeedToDrift = 8f;        // Minimum speed required to initiate drift
@@ -73,7 +74,7 @@ public class CarControlScript : MonoBehaviour
     public float boostForce = 30f;            // Force applied during boost
     public float maxBoostTime = 2f;           // Maximum boost duration
     public float[] boostThresholds = { 1f, 2f, 3f }; // Time thresholds for boost levels
-    private float boostTimeRemaining;
+    public float boostTimeRemaining;
 
     bool reset = false;
 
@@ -298,6 +299,7 @@ public class CarControlScript : MonoBehaviour
 
     void FixedUpdate()
     {
+        if (!canMove) return;
         if (reset)
         {
             ResetPosition();
@@ -326,49 +328,38 @@ public class CarControlScript : MonoBehaviour
     {
         if (!removeBounces) return; // Early exit if not needed
 
-        // Avoid raycast every frame - use ground hit data from Update instead
         Vector3 groundNormal = groundHit.normal;
         if (groundNormal == Vector3.zero) groundNormal = Vector3.up;
 
-        // Process only contact pairs with our sphere collider
         for (int pairIndex = 0; pairIndex < contactPairs.Length; pairIndex++)
         {
             ModifiableContactPair pair = contactPairs[pairIndex];
 
-            // Quick check if this pair involves our sphere
             if (pair.colliderInstanceID != colliderInstanceId) continue;
 
-            // Quick check if this pair involves the track
             if (pair.otherColliderInstanceID != trackColliderInstanceId) continue;
 
-            // Process contacts in this pair
             for (int i = 0; i < pair.contactCount; i++)
             {
                 Vector3 contactNormal = pair.GetNormal(i);
 
-                // Use a more efficient smoothing method
                 Vector3 smoothedNormal = FastSmoothNormal(contactNormal);
 
-                // Set the smoothed normal
                 pair.SetNormal(i, smoothedNormal);
             }
         }
     }
 
-    // Faster version of SmoothNormal that avoids expensive operations
     private Vector3 FastSmoothNormal(Vector3 currentNormal)
     {
-        // Use a simpler exponential moving average approach
         if (normalAverage == Vector3.zero)
         {
             normalAverage = currentNormal;
             return currentNormal;
         }
 
-        // Simple lerp between current normal and running average
         normalAverage = Vector3.Lerp(normalAverage, currentNormal, 1.0f - smoothingFactor);
 
-        // Ensure normal is normalized
         if (normalAverage.sqrMagnitude < 0.001f)
             return Vector3.up;
 
@@ -613,7 +604,7 @@ public class CarControlScript : MonoBehaviour
         {
             // Check if we're moving backwards
             float forwardSpeed = Vector3.Dot(sphereRb.linearVelocity, carBodyTransform.forward);
-            float steeringDirection = Mathf.Sign(forwardSpeed); // Will be -1 when moving backwards
+            float steeringDirection = Mathf.Sign(forwardSpeed); 
 
             if (isDrifting)
             {

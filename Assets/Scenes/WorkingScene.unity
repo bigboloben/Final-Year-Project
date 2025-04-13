@@ -119,6 +119,62 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &231820705
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 231820707}
+  - component: {fileID: 231820706}
+  m_Layer: 0
+  m_Name: Testing
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 0
+--- !u!114 &231820706
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 231820705}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 38c1610c7d025eb4cad536040d4e513c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  trackHandler: {fileID: 0}
+  testCount: 100
+  testGridWithNoise: 1
+  testCircularLayout: 1
+  testRandom: 1
+  saveResultsToFile: 1
+  resultsFilePath: TrackGenerationResults.csv
+  cornerAngleThreshold: 25
+  samplePoints: 200
+  minStraightLength: 10
+  showTestTracksInScene: 0
+  testTrackDisplayTime: 2
+--- !u!4 &231820707
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 231820705}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -13.321931, y: 16.56689, z: 20.358805}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0
@@ -378,7 +434,7 @@ MonoBehaviour:
   wallHeight: 0.5
   wallWidth: 0.5
   segments: 1
-  banking: 15
+  banking: 0
   supportCount: 20
   pointCount: 150
   canvasSize: 1000
@@ -395,17 +451,17 @@ MonoBehaviour:
   cameraFollowSpeed: 6
   cameraRotationSpeed: 5
   cameraLookSensitivity: 100
-  enableAICars: 0
-  aiModel: {fileID: 5022602860645237092, guid: 68157e96d0226eb44b6d26907ca068ec, type: 3}
+  enableAICars: 1
+  aiModel: {fileID: 5022602860645237092, guid: ca87d6308c0214f46a67d6cb2acd3fca, type: 3}
   aiRayCount: 9
   aiRayAngle: 180
   aiSensorLength: 20
   aiLayerName: Agent
   totalLaps: 3
-  countdownTime: 3
-  setupCar: 0
+  countdownTime: 10
+  setupCar: 1
   setupTrack: 1
-  setupFloor: 0
+  setupFloor: 1
 --- !u!4 &1682255712
 Transform:
   m_ObjectHideFlags: 0
@@ -577,3 +633,4 @@ SceneRoots:
   - {fileID: 1682255712}
   - {fileID: 817482505}
   - {fileID: 1798842569}
+  - {fileID: 231820707}

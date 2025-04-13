@@ -81,5 +81,15 @@ namespace Assets.TrackGeneration
                 Vector2.Distance(edge.Start, otherEdge.End) < 0.001f &&
                 Vector2.Distance(edge.End, otherEdge.Start) < 0.001f));
         }
+
+        public List<Vector2> GetVertices()
+        {
+            return vertices;
+        }
+
+        public List<Edge> GetEdges()
+        {
+            return edges;
+        }
     }
 }

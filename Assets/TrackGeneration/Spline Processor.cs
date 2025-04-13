@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq.Expressions;
 using Unity.Mathematics;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Splines;
 
@@ -112,29 +113,44 @@ namespace Assets.TrackGeneration
         }
 
 
-        private Vector3[] GenerateSplinePoints(
-            Spline spline,
-            SplineArcLengthTable table,
-            int numberOfPoints,
-            Vector3 heightOffset)
+        private List<Vector3[]> GenerateSplines(List<SplineContainer> splineContainers)
         {
+            
             // Create array with one extra point for the closing point
-            Vector3[] points = new Vector3[numberOfPoints + 1];
-            float splineLength = spline.GetLength();
+            
+            Spline leftSpline = splineContainers[0].Spline;
+            Spline centerSpline = splineContainers[1].Spline;
+            Spline rightSpline = splineContainers[2].Spline;
+            int numberOfPoints = Mathf.Max(5, Mathf.RoundToInt(centerSpline.GetLength() * parameters.SegmentsPerUnit));
+            List<Spline> splines = new(new[] { leftSpline, centerSpline, rightSpline });
 
-            for (int i = 0; i < numberOfPoints; i++)
+            List<Vector3[]> pointList = new();
+
+            Vector3 heightOffset = TrackParameters.TRACK_HEIGHT_OFFSET * Vector3.up;
+
+
+            foreach (var spline in splines)
             {
-                float normalizedArcLength = i / (float)(numberOfPoints - 1);
-                float t = table.ConvertLengthToT(normalizedArcLength * splineLength);
-                Vector3 position = spline.EvaluatePosition(t);
-                position += heightOffset;
-                points[i] = position;
+                Vector3[] points = new Vector3[numberOfPoints + 1];
+
+                float splineLength = spline.GetLength();
+
+                for (int i = 0; i < numberOfPoints - 1; i++)
+                {
+                    float t = i / (float)(numberOfPoints - 1);
+                    Vector3 position = spline.EvaluatePosition(t);
+                    position += heightOffset;
+                    points[i] = position;
+                }
+
+                // Add the first point again at the end
+                points[numberOfPoints] = points[0];
+
+                pointList.Add(points);
+
+               
             }
-
-            // Add the first point again at the end
-            points[numberOfPoints] = points[0];
-
-            return points;
+            return pointList;
         }
     }
 }

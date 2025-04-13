@@ -16,12 +16,12 @@ namespace Assets.TrackGeneration
         public TrackGenerationParameters trackGenParam = new TrackGenerationParameters();
         public bool optimiseTrack = false;
 
-        private List<Vector2> points;
-        private Graph graph;
-        private DelaunayTriangulation delaunayTriangulation;
-        private List<Cycle> cycles;
-        private Cycle cycle;
-        private VoronoiDiagram voronoi;
+        public List<Vector2> points;
+        public Graph graph;
+        public DelaunayTriangulation delaunayTriangulation;
+        public List<Cycle> cycles;
+        public Cycle cycle;
+        public VoronoiDiagram voronoi;
         public SplineContainer trackSpline;
         public SplineContainer rightSpline;
         public SplineContainer leftSpline;
@@ -35,7 +35,7 @@ namespace Assets.TrackGeneration
         public float wallHeight = 0.5f;
         public float wallWidth = 0.5f;
         public float segments = 1f;
-        public float banking = 15f;
+        public float banking = 0f;
         public int supportCount = 20;
 
         public Material trackMaterial;
@@ -60,7 +60,7 @@ namespace Assets.TrackGeneration
         private Vector3 startPosition2;
         private Quaternion startRotation;
 
-        private GameObject trackMesh;
+        public GameObject trackMesh;
         private List<LineRenderer> debugLineRenderers = new List<LineRenderer>();
         private TrackMesh trackMeshGenerator;
         private TrackParameters trackParameters;
@@ -387,19 +387,15 @@ namespace Assets.TrackGeneration
         public float[] GenerateSmoothArray(int length, float minHeight = 0f, float maxHeight = 10f)
         {
             float[] array = new float[length];
-            float scale = 0.3f; // Increased scale for more frequent changes
+            float scale = 0.3f; 
             float offset = UnityEngine.Random.Range(0f, 1000f);
 
             for (int i = 0; i < length; i++)
             {
-                // Using multiple frequencies of noise to add more detail
+        
                 float noise1 = Mathf.PerlinNoise(i * scale + offset, 0.5f);
-                float noise2 = Mathf.PerlinNoise(i * scale * 2 + offset, 1.5f) * 0.5f; // Higher frequency, lower amplitude
-
-                // Combine the noise values with more weight on the primary frequency
+                float noise2 = Mathf.PerlinNoise(i * scale * 2 + offset, 1.5f) * 0.5f;
                 float noiseValue = (noise1 + noise2);
-
-                // Map to desired range
                 array[i] = Mathf.Lerp(minHeight, maxHeight, noiseValue);
             }
 

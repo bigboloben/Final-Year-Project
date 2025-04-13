@@ -10,6 +10,7 @@ namespace Assets.TrackGeneration
         private List<VoronoiCell> cells;
         private List<Edge> voronoiEdges;
         private TrackGenerationParameters parameters;
+        private List<Vector2> delaunayVertices; // Store unique vertices from triangulation
 
         public VoronoiDiagram(DelaunayTriangulation delaunay, List<Triangle> triangles,
                              TrackGenerationParameters parameters = null)
@@ -18,28 +19,123 @@ namespace Assets.TrackGeneration
             this.cells = new List<VoronoiCell>();
             this.voronoiEdges = new List<Edge>();
             this.parameters = parameters ?? new TrackGenerationParameters();
+
+            // Extract unique vertices from Delaunay triangulation
+            this.delaunayVertices = ExtractUniqueVertices(triangles);
+
             GenerateVoronoiCells();
+        }
+
+        private List<Vector2> ExtractUniqueVertices(List<Triangle> triangles)
+        {
+            HashSet<Vector2> uniqueVertices = new HashSet<Vector2>(new Vector2EqualityComparer());
+
+            foreach (Triangle triangle in triangles)
+            {
+                uniqueVertices.Add(triangle.P1);
+                uniqueVertices.Add(triangle.P2);
+                uniqueVertices.Add(triangle.P3);
+            }
+
+            return uniqueVertices.ToList();
         }
 
         private void GenerateVoronoiCells()
         {
-            foreach (Triangle triangle in delaunayTriangles)
+            // For each vertex in the Delaunay triangulation
+            foreach (Vector2 vertex in delaunayVertices)
             {
-                var neighbors = delaunayTriangles.Where(t => t != triangle && t.ShareEdge(triangle)).ToList();
-                List<Vector2> cellVertices = new List<Vector2>();
-                cellVertices.Add(triangle.CircumCenter);
+                // Find all triangles that share this vertex
+                List<Triangle> adjacentTriangles = delaunayTriangles.Where(t =>
+                    Vector2.Distance(t.P1, vertex) < 0.001f ||
+                    Vector2.Distance(t.P2, vertex) < 0.001f ||
+                    Vector2.Distance(t.P3, vertex) < 0.001f).ToList();
 
-                foreach (var neighbor in neighbors)
+                if (adjacentTriangles.Count < 3)
                 {
-                    cellVertices.Add(neighbor.CircumCenter);
-                    Edge voronoiEdge = new Edge(triangle.CircumCenter, neighbor.CircumCenter);
+                    // Skip vertices with too few adjacent triangles (likely on the boundary)
+                    continue;
+                }
+
+                // Sort triangles in clockwise or counter-clockwise order around the vertex
+                List<Triangle> orderedTriangles = OrderTrianglesAroundVertex(vertex, adjacentTriangles);
+
+                // Extract circumcenters to form Voronoi cell vertices
+                List<Vector2> cellVertices = orderedTriangles.Select(t => t.CircumCenter).ToList();
+
+                // Create Voronoi cell
+                VoronoiCell cell = new VoronoiCell(cellVertices);
+                cells.Add(cell);
+
+                // Add Voronoi edges
+                for (int i = 0; i < cellVertices.Count; i++)
+                {
+                    Vector2 start = cellVertices[i];
+                    Vector2 end = cellVertices[(i + 1) % cellVertices.Count];
+
+                    Edge voronoiEdge = new Edge(start, end);
                     if (!voronoiEdges.Any(e => e.Equals(voronoiEdge)))
                     {
                         voronoiEdges.Add(voronoiEdge);
                     }
                 }
+            }
+        }
 
-                cells.Add(new VoronoiCell(cellVertices));
+        private List<Triangle> OrderTrianglesAroundVertex(Vector2 vertex, List<Triangle> triangles)
+        {
+            List<TriangleAnglePair> anglePairs = new List<TriangleAnglePair>();
+
+            // Calculate angle for each triangle
+            foreach (Triangle triangle in triangles)
+            {
+                // Find center of the triangle
+                Vector2 center = (triangle.P1 + triangle.P2 + triangle.P3) / 3;
+
+                // Calculate angle between reference vector (1, 0) and vector from vertex to center
+                Vector2 direction = center - vertex;
+                float angle = Mathf.Atan2(direction.y, direction.x);
+
+                // Convert to degrees and normalize to [0, 360)
+                angle = angle * Mathf.Rad2Deg;
+                if (angle < 0) angle += 360;
+
+                anglePairs.Add(new TriangleAnglePair(triangle, angle));
+            }
+
+            // Sort triangles by angle
+            anglePairs.Sort((a, b) => a.Angle.CompareTo(b.Angle));
+
+            // Return ordered triangles
+            return anglePairs.Select(pair => pair.Triangle).ToList();
+        }
+
+        // Helper class for ordering triangles
+        private class TriangleAnglePair
+        {
+            public Triangle Triangle { get; private set; }
+            public float Angle { get; private set; }
+
+            public TriangleAnglePair(Triangle triangle, float angle)
+            {
+                Triangle = triangle;
+                Angle = angle;
+            }
+        }
+
+        // Helper class for vector equality comparison
+        private class Vector2EqualityComparer : IEqualityComparer<Vector2>
+        {
+            private const float Epsilon = 0.001f;
+
+            public bool Equals(Vector2 x, Vector2 y)
+            {
+                return Vector2.Distance(x, y) < Epsilon;
+            }
+
+            public int GetHashCode(Vector2 obj)
+            {
+                return (int)(obj.x * 100000) ^ (int)(obj.y * 100000);
             }
         }
 
@@ -64,9 +160,26 @@ namespace Assets.TrackGeneration
                     proximityQuality * parameters.ProximityQualityWeight);
         }
 
+        public (float cornerQuality, float straightQuality, float flowQuality, float layoutQuality, float lengthQuality, float proximityQuality, float overallQuality) GetQualities(List<Vector2> trackPoints)
+        {
+            if (trackPoints == null || trackPoints.Count < 4) return (0, 0, 0, 0, 0, 0, 0);
+            float cornerQuality = EvaluateCorners(trackPoints);
+            float straightQuality = EvaluateStraights(trackPoints);
+            float flowQuality = EvaluateTrackFlow(trackPoints);
+            float layoutQuality = EvaluateLayout(trackPoints);
+            float lengthQuality = EvaluateLength(CalculatePathLength(trackPoints));
+            float proximityQuality = EvaluateTrackProximity(trackPoints);
+            // Calculate overall quality
+            float overallQuality = (cornerQuality * parameters.CornerQualityWeight +
+                                    straightQuality * parameters.StraightQualityWeight +
+                                    flowQuality * parameters.FlowQualityWeight +
+                                    layoutQuality * parameters.LayoutQualityWeight +
+                                    lengthQuality * parameters.LengthQualityWeight +
+                                    proximityQuality * parameters.ProximityQualityWeight);
+            return (cornerQuality, straightQuality, flowQuality, layoutQuality, lengthQuality, proximityQuality, overallQuality);
+        }
         private float EvaluateCorners(List<Vector2> points)
         {
-            // Use parameterized values instead of constants
             float tooSharpCorner = parameters.TooSharpCornerAngle;
             float sharpCorner = parameters.SharpCornerAngle;
             float mediumCorner = parameters.MediumCornerAngle;
@@ -91,6 +204,8 @@ namespace Assets.TrackGeneration
                 Vector2 current = points[i];
                 Vector2 next = points[(i + 1) % points.Count];
                 float angle = CalculateAngle(prev, current, next);
+
+                //Debug.Log($"Angle at point {i}: {angle}");
 
                 if (angle < 130)
                 {
@@ -120,9 +235,18 @@ namespace Assets.TrackGeneration
             float varietyScore = cornerTypes.Where(kvp => kvp.Key != "too_sharp" && kvp.Value > 0).Count() / 3.0f;
             float cornerCountQuality = 1.0f - Mathf.Min(1, Mathf.Abs(cornersCount - desiredCorners) / (float)desiredCorners);
 
-            return (cornerCountQuality * 0.4f +
-                    (cornersCount > 0 ? totalCornerQuality / cornersCount : 0) * 0.3f +
-                    varietyScore * 0.3f) * tooSharpPenalty;
+            //Debug.Log($"Corners Count: {cornersCount}");
+            //Debug.Log($"Total Corner Quality: {totalCornerQuality}");
+            //Debug.Log($"Too Sharp Penalty: {tooSharpPenalty}");
+            //Debug.Log($"Variety Score: {varietyScore}");
+            //Debug.Log($"Corner Count Quality: {cornerCountQuality}");
+
+            float finalQuality = (cornerCountQuality * 0.4f +
+                                  (cornersCount > 0 ? totalCornerQuality / cornersCount : 0) * 0.3f +
+                                  varietyScore * 0.3f) * tooSharpPenalty;
+
+            //Debug.Log($"Final corner quality: {finalQuality}");
+            return finalQuality;
         }
 
         private float EvaluateStraights(List<Vector2> points)
@@ -443,6 +567,11 @@ namespace Assets.TrackGeneration
             }
 
             return new Cycle(fixed_points);
+        }
+
+        public List<VoronoiCell> GetCells()
+        {
+            return cells;
         }
     }
 }

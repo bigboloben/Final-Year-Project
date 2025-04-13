@@ -1,6 +1,8 @@
 using UnityEngine;
 using System.Collections.Generic;
 using System;
+using System.IO;      // Needed for file IO operations
+using System.Text;    // For StringBuilder
 
 namespace Assets.TrackGeneration
 {
@@ -96,8 +98,6 @@ namespace Assets.TrackGeneration
                         checkpoint.Initialize(this);
                     }
                 }
-                //Debug.Log($"Initialized RaceManager with {checkpoints.Count} checkpoints");
-
                 // Auto-start race if we're in training mode with agents
                 if (HasAgentsOnly() && skipCountdownForTraining)
                 {
@@ -106,6 +106,9 @@ namespace Assets.TrackGeneration
             }
         }
 
+        /// <summary>
+        /// Registers a player car and immediately disables its movement.
+        /// </summary>
         public void RegisterPlayer(GameObject playerCar, string playerName = "Player")
         {
             if (!playerStats.ContainsKey(playerCar))
@@ -118,9 +121,19 @@ namespace Assets.TrackGeneration
                     isAgent = false,
                     hasCompletedFullCheckpointCircuit = false
                 });
+
+                // Disable movement at initialization
+                CarControlScript control = playerCar.GetComponent<CarControlScript>();
+                if (control != null)
+                {
+                    control.canMove = false;
+                }
             }
         }
 
+        /// <summary>
+        /// Registers an AI car and immediately disables its movement.
+        /// </summary>
         public void RegisterAgent(GameObject agentCar, string agentName = "Agent")
         {
             if (!playerStats.ContainsKey(agentCar))
@@ -133,6 +146,13 @@ namespace Assets.TrackGeneration
                     isAgent = true,
                     hasCompletedFullCheckpointCircuit = false
                 });
+
+                // Disable movement at initialization
+                CarControlScript control = agentCar.GetComponent<CarControlScript>();
+                if (control != null)
+                {
+                    control.canMove = false;
+                }
             }
         }
 
@@ -147,7 +167,6 @@ namespace Assets.TrackGeneration
         {
             if (!playerStats.ContainsKey(player)) return 0;
 
-            // Calculate total based on laps and current checkpoint
             int checkpointsPerLap = checkpoints.Count;
             int completedLaps = playerStats[player].currentLap;
             int currentLapCheckpoints = playerStats[player].nextCheckpointIndex;
@@ -171,7 +190,7 @@ namespace Assets.TrackGeneration
         {
             if (!playerStats.ContainsKey(player)) return;
 
-            // Start race automatically if it's not active but an agent passes a checkpoint
+            // Auto-start race if inactive and an agent passes a checkpoint
             if (!isRaceActive && playerStats[player].isAgent)
             {
                 StartRace();
@@ -182,23 +201,23 @@ namespace Assets.TrackGeneration
             var stats = playerStats[player];
             int checkpointIndex = checkpoints.IndexOf(checkpoint);
 
-            // Always notify about checkpoint passing regardless of correctness
+            // Always notify about checkpoint passing
             OnCheckpointPassed?.Invoke(player, checkpointIndex, checkpoints.Count);
 
             // Check if this is the expected checkpoint
             if (checkpointIndex == stats.nextCheckpointIndex)
             {
-                // Update next expected checkpoint
+                // Update the next expected checkpoint
                 stats.nextCheckpointIndex = (checkpointIndex + 1) % checkpoints.Count;
 
-                // If this is checkpoint 0 and the player has completed a full circuit
+                // Check if a full lap was completed
                 if (checkpointIndex == 0 && stats.hasCompletedFullCheckpointCircuit)
                 {
                     CompletePlayerLap(player);
                     stats.hasCompletedFullCheckpointCircuit = false; // Reset for next lap
                 }
 
-                // If this is the last checkpoint before checkpoint 0, mark as completed circuit
+                // If last checkpoint before checkpoint 0, mark as completed circuit
                 if (checkpointIndex == checkpoints.Count - 1)
                 {
                     stats.hasCompletedFullCheckpointCircuit = true;
@@ -224,12 +243,12 @@ namespace Assets.TrackGeneration
 
             OnLapCompleted?.Invoke(player);
 
-            // Reset for next lap
+            // Reset lap timing and advance lap count
             stats.currentLapTime = 0f;
             stats.currentLap++;
             stats.nextCheckpointIndex = 1;
 
-            // Check if race is complete for this player
+            // Check for race completion
             if (stats.currentLap >= totalLaps)
             {
                 stats.hasFinishedRace = true;
@@ -239,13 +258,17 @@ namespace Assets.TrackGeneration
                 if (AreAllPlayersFinished())
                 {
                     OnAllPlayersFinish?.Invoke();
+                    WriteRaceResultsToFile(); // Output results after all players finish
                 }
             }
         }
 
+        /// <summary>
+        /// Initiates the race start sequence.
+        /// If not skipping countdown, resets the countdown timer.
+        /// </summary>
         public void InitiateRaceStart()
         {
-            // If we're in training mode with just agents, skip countdown
             if (HasAgentsOnly() && skipCountdownForTraining)
             {
                 StartRace();
@@ -260,15 +283,28 @@ namespace Assets.TrackGeneration
             }
         }
 
+        /// <summary>
+        /// Starts the race by resetting race state and enabling car movement.
+        /// </summary>
         private void StartRace()
         {
             isRaceActive = true;
             raceTimer = 0f;
 
-            // Reset all stats when the race starts
+            // Reset stats when the race begins
             foreach (var stats in playerStats.Values)
             {
                 ResetPlayerStats(stats);
+            }
+
+            // Enable movement for all registered cars by setting their canMove flag to true.
+            foreach (GameObject car in playerStats.Keys)
+            {
+                CarControlScript control = car.GetComponent<CarControlScript>();
+                if (control != null)
+                {
+                    control.canMove = true;
+                }
             }
 
             OnRaceStart?.Invoke();
@@ -306,14 +342,17 @@ namespace Assets.TrackGeneration
         public void EndRace()
         {
             isRaceActive = false;
+            WriteRaceResultsToFile(); // Optionally call here if ending race manually
         }
 
-        // Getter methods for UI and other systems
+        // Getter methods
         public float GetGlobalRaceTime() => raceTimer;
         public float GetPlayerCurrentLapTime(GameObject player) => playerStats.ContainsKey(player) ? playerStats[player].currentLapTime : 0f;
         public float GetPlayerBestLapTime(GameObject player) => playerStats.ContainsKey(player) ? playerStats[player].bestLapTime : 0f;
         public int GetPlayerCurrentLap(GameObject player) => playerStats.ContainsKey(player) ? playerStats[player].currentLap : 0;
         public int GetPlayerNextCheckpoint(GameObject player) => playerStats.ContainsKey(player) ? playerStats[player].nextCheckpointIndex : 0;
+        public List<float> GetPlayerLapTimes(GameObject player) => playerStats.ContainsKey(player) ? playerStats[player].lapTimes : new List<float>();
+
         public bool IsRaceActive() => isRaceActive;
         public float GetCountdownTime() => countdownTimer;
         public Vector3 GetNextCheckpointPosition(GameObject player)
@@ -324,5 +363,51 @@ namespace Assets.TrackGeneration
             return checkpoints[nextIdx].transform.position;
         }
         public int GetTotalCheckpoints() => checkpoints.Count;
+
+        /// <summary>
+        /// Helper method to format a time value (in seconds) as a string (mm:ss.mmm).
+        /// </summary>
+        private string FormatTime(float timeInSeconds)
+        {
+            int minutes = (int)(timeInSeconds / 60);
+            int seconds = (int)(timeInSeconds % 60);
+            int milliseconds = (int)((timeInSeconds * 1000) % 1000);
+            return $"{minutes:00}:{seconds:00}.{milliseconds:000}";
+        }
+
+        /// <summary>
+        /// Writes the race results (lap times and full race times) to a text file.
+        /// </summary>
+        private void WriteRaceResultsToFile()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("Race Results:");
+            sb.AppendLine($"Overall Race Time: {FormatTime(raceTimer)}");
+            sb.AppendLine();
+
+            foreach (var kvp in playerStats)
+            {
+                PlayerRaceStats stats = kvp.Value;
+                sb.AppendLine($"Player: {stats.playerName}");
+                sb.AppendLine($"Full Race Time: {(stats.hasFinishedRace ? FormatTime(stats.raceCompletionTime) : "Race Incomplete")}");
+                sb.AppendLine("Lap Times:");
+                if (stats.lapTimes.Count > 0)
+                {
+                    for (int i = 0; i < stats.lapTimes.Count; i++)
+                    {
+                        sb.AppendLine($"  Lap {i + 1}: {FormatTime(stats.lapTimes[i])}");
+                    }
+                }
+                else
+                {
+                    sb.AppendLine("  No lap times recorded.");
+                }
+                sb.AppendLine(); // extra newline for clarity
+            }
+
+            string filePath = Path.Combine(Application.persistentDataPath, "RaceResults.txt");
+            File.WriteAllText(filePath, sb.ToString());
+            Debug.Log($"Race results written to: {filePath}");
+        }
     }
 }

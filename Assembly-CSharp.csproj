@@ -72,7 +72,6 @@
     <Compile Include="Assets\AI\TrackSensingSystem.cs" />
     <Compile Include="Assets\Noise Test.cs" />
     <Compile Include="Assets\TrackGeneration\Floor Generation.cs" />
-    <Compile Include="Assets\Shaders\OutlineRenderingFeature\VibrationFeature.cs" />
     <Compile Include="Assets\TrackGeneration\Checkpoints.cs" />
     <Compile Include="Assets\PlaneGen.cs" />
     <Compile Include="Assets\TrackGeneration\TrackHandler.cs" />
@@ -81,11 +80,15 @@
     <Compile Include="Assets\TrackGeneration\PointGeneration.cs" />
     <Compile Include="Assets\FollowCameraScript.cs" />
     <Compile Include="Assets\TrackGeneration\VoronoiCell.cs" />
+    <Compile Include="Assets\Visualisation\Extensions.cs" />
+    <Compile Include="Assets\Visualisation\TrackTestingVisualisation.cs" />
     <Compile Include="Assets\TrackGeneration\Edge.cs" />
     <Compile Include="Assets\OrbitCam.cs" />
     <Compile Include="Assets\TrackGeneration\Spline Processor.cs" />
+    <Compile Include="Assets\Testing\Track Testing.cs" />
     <Compile Include="Assets\Samples\Universal RP\17.0.3\URP RenderGraph Samples\RendererList\RendererListRenderFeature.cs" />
     <Compile Include="Assets\TrackGeneration\SplineSampling.cs" />
+    <Compile Include="Assets\Visualisation\Visualisation.cs" />
     <Compile Include="Assets\TrackGeneration\TrackGenerationParameters.cs" />
     <Compile Include="Assets\Samples\Universal RP\17.0.3\URP RenderGraph Samples\FramebufferFetch\FrameBufferFetchRenderFeature.cs" />
     <Compile Include="Assets\TrackGeneration\RaceUI.cs" />
@@ -101,6 +104,7 @@
     <Compile Include="Assets\TrackGeneration\Track Texture Generator.cs" />
     <Compile Include="Assets\AntiRollBarScript.cs" />
     <Compile Include="Assets\AI\SimulationSpeedController.cs" />
+    <Compile Include="Assets\Testing\AI Testing.cs" />
     <Compile Include="Assets\SceneHandler.cs" />
     <Compile Include="Assets\AI\InferenceCarAgent.cs" />
     <Compile Include="Assets\TrackGeneration\Graph.cs" />
@@ -128,6 +132,7 @@
   <ItemGroup>
     <None Include="Assets\Samples\Splines\2.7.2\Spline Examples (requires Shader Graph package)\UXML\PaintUI.uxml" />
     <None Include="Assets\Shaders\GetCrossSampleUVs.hlsl" />
+    <None Include="Assets\Shaders\SobelDepth.hlsl" />
     <None Include="Assets\TextMesh Pro\Shaders\TMPro.cginc" />
     <None Include="Assets\TextMesh Pro\Shaders\TMP_SDF-Mobile Overlay.shader" />
     <None Include="Assets\Samples\Universal RP\17.0.3\URP RenderGraph Samples\Compute\ComputeShaderExample.compute" />
